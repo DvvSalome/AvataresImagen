@@ -1,11 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { HAIR_COLORS, HAIR_LENGTHS, LOADING_MESSAGES } from './constants';
-import { Avatar, GenerationStatus, HairColor, HairLength } from './types';
+import { Avatar, BaseOption, GenerationStatus, HairColor, HairLength } from './types';
 import { generateChibiAvatarViaEdgeFunction } from './services/avatarService';
 import { Button } from './components/Button';
-
-type BaseOption = 'female' | 'male';
 
 // URLs de las imágenes base en Storage
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://ejzyhwfpmjpwvfmpvfxo.supabase.co';
@@ -15,6 +13,7 @@ const BASE_IMAGES = {
 };
 
 const App: React.FC = () => {
+  const [userName, setUserName] = useState('');
   const [selectedColor, setSelectedColor] = useState<HairColor>(HAIR_COLORS[0]);
   const [selectedLength, setSelectedLength] = useState<HairLength>(HAIR_LENGTHS[0]);
   const [selectedBase, setSelectedBase] = useState<BaseOption>('female');
@@ -44,7 +43,7 @@ const App: React.FC = () => {
     try {
       // Combinar color + longitud en la descripción del pelo
       const hairDescription = `${selectedColor.colorId} ${selectedLength.lengthId} hair`;
-      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase);
+      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase, userName.trim());
       const newAvatar: Avatar = {
         id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         imageUrl,
@@ -89,10 +88,29 @@ const App: React.FC = () => {
           
           {/* Customizer Sidebar */}
           <div className="lg:col-span-4 space-y-8">
+            {/* Nombre (obligatorio) */}
+            <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center text-sky-600 text-sm">1</span>
+                Tu nombre
+              </h2>
+              <input
+                type="text"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                placeholder="Ej: Luisa, Carlos..."
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                maxLength={50}
+              />
+              {userName.trim().length === 0 && (
+                <p className="mt-2 text-xs text-amber-600">Obligatorio para generar tu avatar.</p>
+              )}
+            </section>
+
             {/* Selector de Base */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-sm">1</span>
+                <span className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-sm">2</span>
                 Elige la Base
               </h2>
               
@@ -143,7 +161,7 @@ const App: React.FC = () => {
             {/* Selector de Color de Cabello */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-sm">2</span>
+                <span className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-sm">3</span>
                 Color del Cabello
               </h2>
               
@@ -173,7 +191,7 @@ const App: React.FC = () => {
             {/* Selector de Longitud de Cabello */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-sm">3</span>
+                <span className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-sm">4</span>
                 Longitud del Cabello
               </h2>
               
@@ -219,22 +237,26 @@ const App: React.FC = () => {
 
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">4</span>
+                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">5</span>
                 Generar Avatar
               </h2>
               
               <p className="text-slate-500 text-sm mb-6">
                 Nuestro sistema AI generará un avatar único en estilo Chibi basado en tu selección. 
-                Perfecto para Slack, Teams o LinkedIn.
+                Se guardará en Supabase con tu nombre (ej: avatar_luisa).
               </p>
 
               <Button 
                 onClick={handleGenerate} 
                 className="w-full h-14 text-lg"
                 isLoading={status === GenerationStatus.LOADING}
+                disabled={!userName.trim()}
               >
                 Generar con AI
               </Button>
+              {!userName.trim() && (
+                <p className="mt-2 text-xs text-slate-500">Escribe tu nombre arriba para habilitar el botón.</p>
+              )}
 
               {!import.meta.env.VITE_SUPABASE_ANON_KEY && (
                 <div className="mt-4 p-3 bg-amber-50 text-amber-800 text-xs rounded-xl border border-amber-200">
@@ -327,7 +349,7 @@ const App: React.FC = () => {
             Powered by <strong>Gemini 2.5 Image</strong> & React Studio
           </p>
           <p className="text-slate-300 text-[10px] mt-2 tracking-widest uppercase font-bold">
-            © 2024 Cowork Avatars Inc.
+            © 2026 Cowork Avatars
           </p>
         </div>
       </footer>

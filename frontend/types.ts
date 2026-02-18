@@ -1,3 +1,4 @@
+export type BaseOption = 'female' | 'male';
 
 export interface Avatar {
   id: string;
@@ -9,7 +10,6 @@ export interface Avatar {
 export interface HairColor {
   name: string;
   color: string;
-  /** Descripción del color en inglés para el prompt */
   colorId: string;
 }
 
@@ -18,17 +18,9 @@ export interface HairLength {
   lengthId: string;
 }
 
-/** @deprecated Usar HairColor + HairLength */
-export interface HairOption {
-  name: string;
-  color: string;
-  /** ID para la Edge Function generate-avatar (ej: short_black, curly_brown) */
-  hairId: string;
-}
-
 export enum GenerationStatus {
   IDLE = 'IDLE',
   LOADING = 'LOADING',
   SUCCESS = 'SUCCESS',
-  ERROR = 'ERROR'
+  ERROR = 'ERROR',
 }

@@ -1,0 +1,8 @@
+# Railway: desplegar solo el frontend (carpeta frontend como raíz del servicio)
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm run start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

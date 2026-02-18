@@ -1,6 +1,5 @@
 import { supabase } from './supabaseClient';
-
-type BaseOption = 'female' | 'male';
+import type { BaseOption } from '../types';
 
 interface GenerateAvatarResponse {
   success: boolean;
@@ -14,14 +13,15 @@ interface GenerateAvatarResponse {
 
 /**
  * Genera un avatar llamando a la Edge Function generate-avatar.
- * La función puede devolver avatarUrl (imagen en Storage) o imageBase64 (Gemini 2.5 Flash).
+ * userName es obligatorio; la imagen se guarda en Storage como avatar_{nombre}_{timestamp}.
  */
 export async function generateChibiAvatarViaEdgeFunction(
   hairDescription: string,
-  base: BaseOption = 'female'
+  base: BaseOption = 'female',
+  userName: string
 ): Promise<string> {
   const { data, error: fnError } = await supabase.functions.invoke('generate-avatar', {
-    body: { config: { base, hairDescription } },
+    body: { config: { base, hairDescription, userName: userName.trim() } },
   });
 
   const response = data as GenerateAvatarResponse | null;
