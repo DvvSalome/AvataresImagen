@@ -1,0 +1,12 @@
+{
+  "name": "cowork-avatars-root",
+  "private": true,
+  "description": "Root package for Railway deploy - builds and serves frontend",
+  "scripts": {
+    "build": "cd frontend && npm ci && npm run build",
+    "start": "cd frontend && npm run start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
