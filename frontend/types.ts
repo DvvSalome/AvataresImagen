@@ -6,6 +6,19 @@ export interface Avatar {
   createdAt: number;
 }
 
+export interface HairColor {
+  name: string;
+  color: string;
+  /** Descripción del color en inglés para el prompt */
+  colorId: string;
+}
+
+export interface HairLength {
+  name: string;
+  lengthId: string;
+}
+
+/** @deprecated Usar HairColor + HairLength */
 export interface HairOption {
   name: string;
   color: string;

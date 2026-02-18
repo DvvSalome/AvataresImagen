@@ -29,11 +29,12 @@ serve(async (req) => {
   try {
     const body = await req.json()
     const { config } = body
-    console.log("[generate-avatar] request start", JSON.stringify({ base: config?.base, hairId: config?.hairId }))
+    console.log("[generate-avatar] request start", JSON.stringify({ base: config?.base, hairDescription: config?.hairDescription || config?.hairId }))
 
-    if (!config?.base || !config?.hairId) {
+    const hairDescription = config?.hairDescription || config?.hairId || ""
+    if (!config?.base || !hairDescription) {
       return new Response(
-        JSON.stringify({ error: "Faltan config.base y config.hairId", success: false }),
+        JSON.stringify({ error: "Faltan config.base y config.hairDescription", success: false }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
@@ -67,8 +68,10 @@ serve(async (req) => {
     console.log("[generate-avatar] base image downloaded, calling Gemini...")
 
     // 2. Llamar a Gemini con la imagen base + prompt de pelo
-    const hairLabel = String(config.hairId).replace(/_/g, " ")
-    const prompt = `You are modifying a 3D chibi character model in T-pose. Using this character as reference, add a "${hairLabel}" hairstyle. Keep the EXACT same face, body proportions, and T-pose. Keep the same 3D chibi style. Only modify the hair. Same background and lighting. Result must look like the same character with new hair.`
+    const genderContext = base === "male" 
+      ? "This is a MALE character. Use masculine hairstyles appropriate for men."
+      : "This is a FEMALE character. Use feminine hairstyles appropriate for women."
+    const prompt = `You are modifying a 3D chibi character model in T-pose. ${genderContext} Using this character as reference, change the hair to: "${hairDescription}". Keep the EXACT same face, body proportions, and T-pose. Keep the same 3D chibi style. Only modify the hair color and style. Same background and lighting. Result must look like the same character with new hair.`
 
     const ai = new GoogleGenAI({ apiKey: Deno.env.get("GEMINI_API_KEY")! })
     const response = await ai.models.generateContent({

@@ -1,16 +1,24 @@
 
-import { HairOption } from './types';
+import { HairColor, HairLength } from './types';
 
-export const HAIR_OPTIONS: HairOption[] = [
-  { name: 'Negro Azabache', color: '#1a1a1a', hairId: 'short_black' },
-  { name: 'Castaño Oscuro', color: '#4a2c2a', hairId: 'curly_brown' },
-  { name: 'Castaño Claro', color: '#8b5e3c', hairId: 'curly_brown' },
-  { name: 'Rubio Dorado', color: '#d4af37', hairId: 'long_blonde' },
-  { name: 'Rubio Platino', color: '#e5e4e2', hairId: 'long_blonde' },
-  { name: 'Pelirrojo', color: '#a52a2a', hairId: 'spiky_red' },
-  { name: 'Azul Eléctrico', color: '#0047ab', hairId: 'short_black' },
-  { name: 'Rosa Pastel', color: '#ffd1dc', hairId: 'long_blonde' },
-  { name: 'Verde Menta', color: '#98ff98', hairId: 'short_black' },
+export const HAIR_COLORS: HairColor[] = [
+  { name: 'Negro Azabache', color: '#1a1a1a', colorId: 'jet black' },
+  { name: 'Castaño Oscuro', color: '#4a2c2a', colorId: 'dark brown' },
+  { name: 'Castaño Claro', color: '#8b5e3c', colorId: 'light brown' },
+  { name: 'Rubio Dorado', color: '#d4af37', colorId: 'golden blonde' },
+  { name: 'Rubio Platino', color: '#e5e4e2', colorId: 'platinum blonde' },
+  { name: 'Pelirrojo', color: '#a52a2a', colorId: 'bright red' },
+  { name: 'Azul Eléctrico', color: '#0047ab', colorId: 'electric blue' },
+  { name: 'Rosa Pastel', color: '#ffd1dc', colorId: 'pastel pink' },
+  { name: 'Verde Menta', color: '#98ff98', colorId: 'mint green' },
+  { name: 'Morado', color: '#8b5cf6', colorId: 'purple' },
+  { name: 'Blanco', color: '#f8fafc', colorId: 'white' },
+];
+
+export const HAIR_LENGTHS: HairLength[] = [
+  { name: 'Corto', lengthId: 'short' },
+  { name: 'Medio', lengthId: 'medium' },
+  { name: 'Largo', lengthId: 'long' },
 ];
 
 export const LOADING_MESSAGES = [

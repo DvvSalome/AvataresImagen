@@ -17,11 +17,11 @@ interface GenerateAvatarResponse {
  * La función puede devolver avatarUrl (imagen en Storage) o imageBase64 (Gemini 2.5 Flash).
  */
 export async function generateChibiAvatarViaEdgeFunction(
-  hairId: string,
+  hairDescription: string,
   base: BaseOption = 'female'
 ): Promise<string> {
   const { data, error: fnError } = await supabase.functions.invoke('generate-avatar', {
-    body: { config: { base, hairId } },
+    body: { config: { base, hairDescription } },
   });
 
   const response = data as GenerateAvatarResponse | null;
@@ -32,10 +32,10 @@ export async function generateChibiAvatarViaEdgeFunction(
   }
   if (response?.error) throw new Error(response.error);
 
-  if (response.avatarUrl) return response.avatarUrl;
-  const base64 = response.imageBase64 ?? response.image;
+  if (response?.avatarUrl) return response.avatarUrl;
+  const base64 = response?.imageBase64 ?? response?.image;
   if (base64) {
-    const mime = response.mimeType || 'image/png';
+    const mime = response?.mimeType || 'image/png';
     return `data:${mime};base64,${base64}`;
   }
 

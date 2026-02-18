@@ -1,12 +1,23 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { HAIR_OPTIONS, LOADING_MESSAGES } from './constants';
-import { Avatar, GenerationStatus } from './types';
+import React, { useState, useEffect } from 'react';
+import { HAIR_COLORS, HAIR_LENGTHS, LOADING_MESSAGES } from './constants';
+import { Avatar, GenerationStatus, HairColor, HairLength } from './types';
 import { generateChibiAvatarViaEdgeFunction } from './services/avatarService';
 import { Button } from './components/Button';
 
+type BaseOption = 'female' | 'male';
+
+// URLs de las imágenes base en Storage
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://ejzyhwfpmjpwvfmpvfxo.supabase.co';
+const BASE_IMAGES = {
+  female: `${SUPABASE_URL}/storage/v1/object/public/avatars/bases/base_female.jpg`,
+  male: `${SUPABASE_URL}/storage/v1/object/public/avatars/bases/base_male.jpg`,
+};
+
 const App: React.FC = () => {
-  const [selectedHair, setSelectedHair] = useState(HAIR_OPTIONS[0]);
+  const [selectedColor, setSelectedColor] = useState<HairColor>(HAIR_COLORS[0]);
+  const [selectedLength, setSelectedLength] = useState<HairLength>(HAIR_LENGTHS[0]);
+  const [selectedBase, setSelectedBase] = useState<BaseOption>('female');
   const [status, setStatus] = useState<GenerationStatus>(GenerationStatus.IDLE);
   const [avatars, setAvatars] = useState<Avatar[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +42,13 @@ const App: React.FC = () => {
     setStatus(GenerationStatus.LOADING);
     setError(null);
     try {
-      const imageUrl = await generateChibiAvatarViaEdgeFunction(selectedHair.hairId, 'female');
+      // Combinar color + longitud en la descripción del pelo
+      const hairDescription = `${selectedColor.colorId} ${selectedLength.lengthId} hair`;
+      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase);
       const newAvatar: Avatar = {
         id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         imageUrl,
-        hairColor: selectedHair.color,
+        hairColor: selectedColor.color,
         createdAt: Date.now()
       };
       setAvatars(prev => [newAvatar, ...prev]);
@@ -76,28 +89,80 @@ const App: React.FC = () => {
           
           {/* Customizer Sidebar */}
           <div className="lg:col-span-4 space-y-8">
+            {/* Selector de Base */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-sm">1</span>
-                Elige el Cabello
+                <span className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-600 text-sm">1</span>
+                Elige la Base
               </h2>
               
-              <div className="grid grid-cols-3 gap-3">
-                {HAIR_OPTIONS.map((option) => (
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setSelectedBase('female')}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-2xl transition-all ${
+                    selectedBase === 'female'
+                      ? 'bg-violet-50 ring-2 ring-violet-500'
+                      : 'hover:bg-slate-50 ring-1 ring-slate-100'
+                  }`}
+                >
+                  <div className="w-20 h-20 rounded-xl overflow-hidden bg-slate-100 shadow-sm">
+                    <img 
+                      src={BASE_IMAGES.female} 
+                      alt="Base Femenina" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                  <span className="text-sm font-semibold text-slate-700">Femenino</span>
+                </button>
+                <button
+                  onClick={() => setSelectedBase('male')}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-2xl transition-all ${
+                    selectedBase === 'male'
+                      ? 'bg-violet-50 ring-2 ring-violet-500'
+                      : 'hover:bg-slate-50 ring-1 ring-slate-100'
+                  }`}
+                >
+                  <div className="w-20 h-20 rounded-xl overflow-hidden bg-slate-100 shadow-sm">
+                    <img 
+                      src={BASE_IMAGES.male} 
+                      alt="Base Masculina" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                  <span className="text-sm font-semibold text-slate-700">Masculino</span>
+                </button>
+              </div>
+            </section>
+
+            {/* Selector de Color de Cabello */}
+            <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-sm">2</span>
+                Color del Cabello
+              </h2>
+              
+              <div className="grid grid-cols-4 gap-2">
+                {HAIR_COLORS.map((option) => (
                   <button
                     key={option.name}
-                    onClick={() => setSelectedHair(option)}
-                    className={`group relative flex flex-col items-center gap-2 p-3 rounded-2xl transition-all ${
-                      selectedHair.name === option.name 
+                    onClick={() => setSelectedColor(option)}
+                    className={`group relative flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all ${
+                      selectedColor.name === option.name 
                       ? 'bg-indigo-50 ring-2 ring-indigo-500' 
                       : 'hover:bg-slate-50 ring-1 ring-slate-100'
                     }`}
                   >
                     <div 
-                      className="w-10 h-10 rounded-full border-2 border-white shadow-sm transition-transform group-hover:scale-110"
+                      className="w-8 h-8 rounded-full border-2 border-white shadow-sm transition-transform group-hover:scale-110"
                       style={{ backgroundColor: option.color }}
                     />
-                    <span className="text-[10px] font-semibold text-center leading-tight text-slate-600">
+                    <span className="text-[9px] font-semibold text-center leading-tight text-slate-600">
                       {option.name}
                     </span>
                   </button>
@@ -105,9 +170,56 @@ const App: React.FC = () => {
               </div>
             </section>
 
+            {/* Selector de Longitud de Cabello */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">2</span>
+                <span className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center text-cyan-600 text-sm">3</span>
+                Longitud del Cabello
+              </h2>
+              
+              <div className="grid grid-cols-3 gap-3">
+                {HAIR_LENGTHS.map((option) => (
+                  <button
+                    key={option.name}
+                    onClick={() => setSelectedLength(option)}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-2xl transition-all ${
+                      selectedLength.name === option.name 
+                      ? 'bg-cyan-50 ring-2 ring-cyan-500' 
+                      : 'hover:bg-slate-50 ring-1 ring-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-end gap-0.5 h-8">
+                      {option.lengthId === 'short' && (
+                        <>
+                          <div className="w-2 h-3 bg-slate-400 rounded-t"></div>
+                          <div className="w-2 h-4 bg-slate-500 rounded-t"></div>
+                          <div className="w-2 h-3 bg-slate-400 rounded-t"></div>
+                        </>
+                      )}
+                      {option.lengthId === 'medium' && (
+                        <>
+                          <div className="w-2 h-4 bg-slate-400 rounded-t"></div>
+                          <div className="w-2 h-6 bg-slate-500 rounded-t"></div>
+                          <div className="w-2 h-4 bg-slate-400 rounded-t"></div>
+                        </>
+                      )}
+                      {option.lengthId === 'long' && (
+                        <>
+                          <div className="w-2 h-5 bg-slate-400 rounded-t"></div>
+                          <div className="w-2 h-8 bg-slate-500 rounded-t"></div>
+                          <div className="w-2 h-5 bg-slate-400 rounded-t"></div>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-slate-700">{option.name}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">4</span>
                 Generar Avatar
               </h2>
               
