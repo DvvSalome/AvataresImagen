@@ -1,0 +1,9 @@
+/* Base styles - la app usa Tailwind desde el CDN en index.html */
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  min-height: 100vh;
+}
