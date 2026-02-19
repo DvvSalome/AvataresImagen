@@ -311,7 +311,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="space-y-2">
                     <p className="text-lg font-bold text-slate-800 animate-pulse">{loadingText}</p>
-                    <p className="text-sm text-slate-400">Esto tomará unos 15-20 segundos</p>
+                    <p className="text-sm text-slate-400">Generando 4 perspectivas, esto tomará ~30-60 segundos</p>
                   </div>
                 </div>
               ) : avatars.length > 0 ? (

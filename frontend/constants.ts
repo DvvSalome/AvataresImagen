@@ -34,7 +34,11 @@ export const OUTFIT_OPTIONS: OutfitOption[] = [
 export const LOADING_MESSAGES = [
   "Esbozando tu pequeño Chibi...",
   "Eligiendo el mejor outfit para la oficina...",
-  "Ajustando el brillo de esos ojos...",
+  "Generando vista frontal...",
+  "Ahora la vista trasera...",
+  "Trabajando en los perfiles laterales...",
   "Peinando el cabello con precisión...",
+  "Ajustando el brillo de esos ojos...",
+  "Guardando todas las perspectivas...",
   "Cargando la ternura al 100%...",
 ];
