@@ -18,10 +18,11 @@ interface GenerateAvatarResponse {
 export async function generateChibiAvatarViaEdgeFunction(
   hairDescription: string,
   base: BaseOption = 'female',
-  userName: string
+  userName: string,
+  outfitDescription: string
 ): Promise<string> {
   const { data, error: fnError } = await supabase.functions.invoke('generate-avatar', {
-    body: { config: { base, hairDescription, userName: userName.trim() } },
+    body: { config: { base, hairDescription, userName: userName.trim(), outfitDescription } },
   });
 
   const response = data as GenerateAvatarResponse | null;

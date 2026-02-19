@@ -1,5 +1,4 @@
-
-import { HairColor, HairLength } from './types';
+import { HairColor, HairLength, OutfitOption } from './types';
 
 export const HAIR_COLORS: HairColor[] = [
   { name: 'Negro Azabache', color: '#1a1a1a', colorId: 'jet black' },
@@ -19,6 +18,17 @@ export const HAIR_LENGTHS: HairLength[] = [
   { name: 'Corto', lengthId: 'short' },
   { name: 'Medio', lengthId: 'medium' },
   { name: 'Largo', lengthId: 'long' },
+];
+
+export const OUTFIT_OPTIONS: OutfitOption[] = [
+  { name: 'Camisa formal', outfitId: 'formal shirt' },
+  { name: 'Buso / Suéter', outfitId: 'sweater' },
+  { name: 'Polera casual', outfitId: 'casual t-shirt' },
+  { name: 'Blusa', outfitId: 'blouse' },
+  { name: 'Camisa a cuadros', outfitId: 'plaid shirt' },
+  { name: 'Hoodie', outfitId: 'hoodie' },
+  { name: 'Vestido casual', outfitId: 'casual dress' },
+  { name: 'Polo', outfitId: 'polo shirt' },
 ];
 
 export const LOADING_MESSAGES = [

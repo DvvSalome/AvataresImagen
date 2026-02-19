@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { HAIR_COLORS, HAIR_LENGTHS, LOADING_MESSAGES } from './constants';
-import { Avatar, BaseOption, GenerationStatus, HairColor, HairLength } from './types';
+import { HAIR_COLORS, HAIR_LENGTHS, LOADING_MESSAGES, OUTFIT_OPTIONS } from './constants';
+import { Avatar, BaseOption, GenerationStatus, HairColor, HairLength, OutfitOption } from './types';
 import { generateChibiAvatarViaEdgeFunction } from './services/avatarService';
 import { Button } from './components/Button';
 
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [userName, setUserName] = useState('');
   const [selectedColor, setSelectedColor] = useState<HairColor>(HAIR_COLORS[0]);
   const [selectedLength, setSelectedLength] = useState<HairLength>(HAIR_LENGTHS[0]);
+  const [selectedOutfit, setSelectedOutfit] = useState<OutfitOption>(OUTFIT_OPTIONS[0]);
   const [selectedBase, setSelectedBase] = useState<BaseOption>('female');
   const [status, setStatus] = useState<GenerationStatus>(GenerationStatus.IDLE);
   const [avatars, setAvatars] = useState<Avatar[]>([]);
@@ -43,7 +44,8 @@ const App: React.FC = () => {
     try {
       // Combinar color + longitud en la descripción del pelo
       const hairDescription = `${selectedColor.colorId} ${selectedLength.lengthId} hair`;
-      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase, userName.trim());
+      const outfitDescription = selectedOutfit.outfitId;
+      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase, userName.trim(), outfitDescription);
       const newAvatar: Avatar = {
         id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         imageUrl,
@@ -235,14 +237,38 @@ const App: React.FC = () => {
               </div>
             </section>
 
+            {/* Selector de Ropa */}
             <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">5</span>
+                <span className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 text-sm">5</span>
+                Ropa / Outfit
+              </h2>
+              
+              <div className="grid grid-cols-2 gap-2">
+                {OUTFIT_OPTIONS.map((option) => (
+                  <button
+                    key={option.name}
+                    onClick={() => setSelectedOutfit(option)}
+                    className={`flex items-center gap-2 p-3 rounded-xl transition-all text-left ${
+                      selectedOutfit.name === option.name
+                        ? 'bg-rose-50 ring-2 ring-rose-500'
+                        : 'hover:bg-slate-50 ring-1 ring-slate-100'
+                    }`}
+                  >
+                    <span className="text-sm font-semibold text-slate-700">{option.name}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 text-sm">6</span>
                 Generar Avatar
               </h2>
               
               <p className="text-slate-500 text-sm mb-6">
-                Nuestro sistema AI generará un avatar único en estilo Chibi basado en tu selección. 
+                Nuestro sistema AI generará un avatar único en estilo Chibi (pelo + ropa) basado en tu selección. 
                 Se guardará en Supabase con tu nombre (ej: avatar_luisa).
               </p>
 

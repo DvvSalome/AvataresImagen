@@ -18,6 +18,11 @@ export interface HairLength {
   lengthId: string;
 }
 
+export interface OutfitOption {
+  name: string;
+  outfitId: string;
+}
+
 export enum GenerationStatus {
   IDLE = 'IDLE',
   LOADING = 'LOADING',

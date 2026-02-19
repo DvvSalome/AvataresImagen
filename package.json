@@ -3,8 +3,8 @@
   "private": true,
   "description": "Root package for Railway deploy - builds and serves frontend",
   "scripts": {
-    "build": "cd frontend && npm ci && npm run build",
-    "start": "cd frontend && npm run start"
+    "build": "cd frontend && npm install && npm run build",
+    "start": "cd frontend && npx serve -s dist"
   },
   "engines": {
     "node": ">=18"

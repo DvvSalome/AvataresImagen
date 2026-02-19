@@ -32,12 +32,22 @@ serve(async (req) => {
     console.log("[generate-avatar] request start", JSON.stringify({ base: config?.base, hairDescription: config?.hairDescription || config?.hairId }))
 
     const hairDescription = config?.hairDescription || config?.hairId || ""
+    const outfitDescription = (config?.outfitDescription ?? "casual t-shirt").trim()
+    const userName = (config?.userName ?? "").trim()
     if (!config?.base || !hairDescription) {
       return new Response(
         JSON.stringify({ error: "Faltan config.base y config.hairDescription", success: false }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
+    if (!userName) {
+      return new Response(
+        JSON.stringify({ error: "El nombre es obligatorio para generar el avatar.", success: false }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      )
+    }
+    // Nombre seguro para el archivo: minúsculas, solo letras/números/guion bajo (ej: Luisa García → avatar_luisa_garcia_1739123456)
+    const safeName = userName.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "").slice(0, 30) || "avatar"
 
     const base = config.base === "male" ? "male" : "female"
     const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").trim()
@@ -67,11 +77,11 @@ serve(async (req) => {
     const base64Image = arrayBufferToBase64(arrayBuffer)
     console.log("[generate-avatar] base image downloaded, calling Gemini...")
 
-    // 2. Llamar a Gemini con la imagen base + prompt de pelo
+    // 2. Llamar a Gemini con la imagen base + prompt de pelo y ropa
     const genderContext = base === "male" 
-      ? "This is a MALE character. Use masculine hairstyles appropriate for men."
-      : "This is a FEMALE character. Use feminine hairstyles appropriate for women."
-    const prompt = `You are modifying a 3D chibi character model in T-pose. ${genderContext} Using this character as reference, change the hair to: "${hairDescription}". Keep the EXACT same face, body proportions, and T-pose. Keep the same 3D chibi style. Only modify the hair color and style. Same background and lighting. Result must look like the same character with new hair.`
+      ? "This is a MALE character. Use masculine hairstyles and clothing appropriate for men."
+      : "This is a FEMALE character. Use feminine hairstyles and clothing appropriate for women."
+    const prompt = `You are modifying a 3D chibi character model in T-pose. ${genderContext} Using this character as reference: (1) Change the hair to: "${hairDescription}". (2) Dress the character in: "${outfitDescription}". Keep the EXACT same face, body proportions, and T-pose. Keep the same 3D chibi style. Only modify the hair and the clothing. Same background and lighting. Result must look like the same character with new hair and new outfit.`
 
     const ai = new GoogleGenAI({ apiKey: Deno.env.get("GEMINI_API_KEY")! })
     const response = await ai.models.generateContent({
@@ -107,9 +117,9 @@ serve(async (req) => {
       )
     }
 
-    // 3. Subir resultado a Storage (avatars/generado/) con el cliente oficial (usa el JWT inyectado correctamente)
+    // 3. Subir resultado a Storage (avatars/generado/) con nombre de la persona: avatar_luisa_1739123456.png
     console.log("[generate-avatar] uploading to Storage...")
-    const fileName = `generado/avatar_${Date.now()}.${ext}`
+    const fileName = `generado/avatar_${safeName}_${Date.now()}.${ext}`
     const imageBytes = Uint8Array.from(atob(generatedBase64), (c) => c.charCodeAt(0))
     const supabase = createClient(supabaseUrl, serviceKey)
     const { data: uploadData, error: uploadError } = await supabase.storage
