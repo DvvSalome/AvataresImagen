@@ -200,6 +200,8 @@ serve(async (req) => {
     ]
 
     let frontUrl = ""
+    const uploadedPaths: Record<string, string> = {}
+
     for (const { key, result } of allPerspectives) {
       if (result.status === "rejected") {
         console.warn(`[generate-avatar] perspectiva "${key}" falló:`, (result as PromiseRejectedResult).reason?.message || (result as PromiseRejectedResult).reason)
@@ -225,6 +227,7 @@ serve(async (req) => {
         continue
       }
 
+      uploadedPaths[key] = uploadData.path
       const publicUrl = supabase.storage.from("avatars").getPublicUrl(uploadData.path).data.publicUrl
       console.log(`[generate-avatar] ${key} uploaded:`, publicUrl)
 
@@ -233,12 +236,83 @@ serve(async (req) => {
       }
     }
 
-    const successCount = allPerspectives.filter((p) => p.result.status === "fulfilled").length
-    console.log(`[generate-avatar] done. ${successCount}/4 perspectives generated. Folder: ${folderName}`)
+    const successCount = Object.keys(uploadedPaths).length
+    console.log(`[generate-avatar] done. ${successCount}/4 perspectives uploaded. Folder: ${folderName}`)
 
-    // Solo devolver la URL frontal al frontend
+    // 5. Iniciar pipeline Meshy (Multi Image → 3D) con las URLs públicas
+    let jobId: string | null = null
+    let meshyDebug: string | null = null
+    const meshyApiKey = (Deno.env.get("MESHY_API_KEY") ?? Deno.env.get("MESHI_API_KEY") ?? "").trim()
+
+    if (!meshyApiKey) {
+      meshyDebug = "MESHY_API_KEY/MESHI_API_KEY not found in env"
+      console.warn("[generate-avatar]", meshyDebug)
+    } else {
+      const imageUrls = ["front", "back", "left", "right"]
+        .filter((k) => uploadedPaths[k])
+        .map((k) => supabase.storage.from("avatars").getPublicUrl(uploadedPaths[k]).data.publicUrl)
+
+      if (imageUrls.length === 0) {
+        meshyDebug = "No images were uploaded successfully for Meshy"
+        console.error("[generate-avatar]", meshyDebug)
+      } else {
+        console.log("[generate-avatar] starting Meshy multi-image-to-3d with", imageUrls.length, "images:", JSON.stringify(imageUrls))
+
+        try {
+          const meshyBody = {
+            image_urls: imageUrls,
+            should_texture: true,
+            should_remesh: true,
+            topology: "triangle",
+            target_polycount: 30000,
+          }
+          const meshyRes = await fetch("https://api.meshy.ai/openapi/v1/multi-image-to-3d", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${meshyApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(meshyBody),
+          })
+
+          const meshyData = await meshyRes.json()
+          console.log("[generate-avatar] Meshy response status:", meshyRes.status, "body:", JSON.stringify(meshyData))
+
+          if (!meshyRes.ok) {
+            meshyDebug = `Meshy API ${meshyRes.status}: ${JSON.stringify(meshyData)}`
+          } else {
+            const meshyTaskId = meshyData.result
+            console.log("[generate-avatar] Meshy task started:", meshyTaskId)
+
+            const { data: jobData, error: jobError } = await supabase
+              .from("avatar_jobs")
+              .insert({
+                user_name: userName,
+                folder_name: folderName,
+                front_url: frontUrl,
+                meshy_task_id: meshyTaskId,
+                status: "creating_3d",
+              })
+              .select("id")
+              .single()
+
+            if (jobError) {
+              meshyDebug = `DB insert failed: ${jobError.message}`
+              console.error("[generate-avatar]", meshyDebug)
+            } else {
+              jobId = jobData.id
+              console.log("[generate-avatar] avatar_job created:", jobId)
+            }
+          }
+        } catch (meshyErr) {
+          meshyDebug = `Exception: ${meshyErr instanceof Error ? meshyErr.message : String(meshyErr)}`
+          console.error("[generate-avatar] Meshy pipeline error:", meshyDebug)
+        }
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, avatarUrl: frontUrl }),
+      JSON.stringify({ success: true, avatarUrl: frontUrl, jobId, meshyDebug }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     )
   } catch (error) {

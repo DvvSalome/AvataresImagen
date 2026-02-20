@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { HAIR_COLORS, HAIR_LENGTHS, LOADING_MESSAGES, OUTFIT_OPTIONS } from './constants';
 import { Avatar, BaseOption, GenerationStatus, HairColor, HairLength, OutfitOption } from './types';
 import { generateChibiAvatarViaEdgeFunction } from './services/avatarService';
@@ -42,15 +43,16 @@ const App: React.FC = () => {
     setStatus(GenerationStatus.LOADING);
     setError(null);
     try {
-      // Combinar color + longitud en la descripción del pelo
       const hairDescription = `${selectedColor.colorId} ${selectedLength.lengthId} hair`;
       const outfitDescription = selectedOutfit.outfitId;
-      const imageUrl = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase, userName.trim(), outfitDescription);
+      const result = await generateChibiAvatarViaEdgeFunction(hairDescription, selectedBase, userName.trim(), outfitDescription);
       const newAvatar: Avatar = {
         id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-        imageUrl,
+        imageUrl: result.imageUrl,
         hairColor: selectedColor.color,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        jobId: result.jobId ?? undefined,
+        meshyDebug: result.meshyDebug ?? undefined,
       };
       setAvatars(prev => [newAvatar, ...prev]);
       setStatus(GenerationStatus.SUCCESS);
@@ -315,12 +317,33 @@ const App: React.FC = () => {
                   </div>
                 </div>
               ) : avatars.length > 0 ? (
-                <div className="w-full h-full flex items-center justify-center relative">
+                <div className="w-full h-full flex flex-col items-center justify-center relative gap-4">
                   <img 
                     src={avatars[0].imageUrl} 
                     alt="Generated Avatar" 
-                    className="max-h-full rounded-2xl shadow-2xl transition-all hover:scale-[1.02] cursor-pointer"
+                    className="max-h-[80%] rounded-2xl shadow-2xl transition-all hover:scale-[1.02] cursor-pointer"
                   />
+                  {avatars[0].jobId ? (
+                    <Link
+                      to={`/viewer/${avatars[0].jobId}`}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl font-semibold hover:bg-violet-700 transition-colors shadow-lg shadow-violet-200"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                      Ver tu chibi en 3D
+                    </Link>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex items-center gap-2 px-5 py-2.5 bg-slate-200 text-slate-500 rounded-xl font-semibold cursor-not-allowed">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                        3D no disponible
+                      </div>
+                      {avatars[0].meshyDebug && (
+                        <p className="text-[10px] text-red-400 max-w-xs text-center break-all">
+                          {avatars[0].meshyDebug}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="absolute top-4 right-4 flex gap-2">
                     <button className="p-2 bg-white/80 backdrop-blur rounded-lg shadow hover:bg-white transition-colors">
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
@@ -372,7 +395,7 @@ const App: React.FC = () => {
       <footer className="mt-auto py-12 border-t border-slate-200 bg-white">
         <div className="max-w-6xl mx-auto px-4 text-center">
           <p className="text-slate-400 text-sm">
-            Powered by <strong>Gemini 2.5 Image</strong> & React Studio
+            Powered by <strong>Gemini 2.5 Image</strong>, <strong>Meshy 3D</strong> & React Studio
           </p>
           <p className="text-slate-300 text-[10px] mt-2 tracking-widest uppercase font-bold">
             © 2026 Cowork Avatars

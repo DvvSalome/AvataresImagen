@@ -5,6 +5,8 @@ export interface Avatar {
   imageUrl: string;
   hairColor: string;
   createdAt: number;
+  jobId?: string;
+  meshyDebug?: string;
 }
 
 export interface HairColor {
@@ -28,4 +30,22 @@ export enum GenerationStatus {
   LOADING = 'LOADING',
   SUCCESS = 'SUCCESS',
   ERROR = 'ERROR',
+}
+
+export type Job3DStatus =
+  | 'creating_3d'
+  | 'remeshing'
+  | 'texturing'
+  | 'completed'
+  | 'error';
+
+export interface AvatarJob {
+  id: string;
+  user_name: string;
+  folder_name: string;
+  front_url: string | null;
+  status: Job3DStatus;
+  model_url: string | null;
+  error_message: string | null;
+  created_at: string;
 }
