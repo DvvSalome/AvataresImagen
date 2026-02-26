@@ -9,6 +9,9 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
 }
 
+/** Carpeta dentro del bucket avatars donde se guardan todos los avatares (ej. avatar_luisa, etc.) */
+const AVATARES_PRUEBA_PREFIX = "avataresPrueba"
+
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
   const chunkSize = 8192
@@ -52,19 +55,30 @@ async function generateRotatedView(
   genderContext: string,
 ): Promise<{ base64: string; mimeType: string; ext: string }> {
   const viewMap: Record<string, string> = {
-    back: "Rotate this EXACT character 180 degrees to show the BACK view. The character must face completely AWAY from the camera. We see the back of the head, the back of the hair, the back of the outfit, and the back of the arms still in T-pose. The hair from behind must be consistent: if it is long hair, the full length of hair must be visible from behind hanging down the back. If it is short hair, it must look short from behind too.",
-    left: "Rotate this EXACT character 90 degrees to the left to show the LEFT SIDE profile view. The character's left shoulder faces the camera. We see a clean side profile of the head, hair, and outfit. The hair length and style must wrap around the head consistently with the front view.",
-    right: "Rotate this EXACT character 90 degrees to the right to show the RIGHT SIDE profile view. The character's right shoulder faces the camera. We see a clean side profile of the head, hair, and outfit. The hair length and style must wrap around the head consistently with the front view.",
+    back: "Show the BACK view (180° rotation). The character faces completely AWAY from the camera. We must see the FULL BODY from behind: back of the head, hair from behind, back of the outfit, back of both arms in T-pose, back of both legs, and the BACK OF THE SHOES/FEET. The spine line should be centered. Every body part visible in the front view must also be visible here.",
+    left: "Show the LEFT SIDE profile view (90° rotation). The character's LEFT shoulder faces the camera. We must see the FULL BODY in profile: side of the head, hair wrapping around the head, side of the torso and outfit, arms extending horizontally (one toward camera, one away), BOTH LEGS in profile, and SHOES/FEET clearly visible at the bottom.",
+    right: "Show the RIGHT SIDE profile view (90° rotation). The character's RIGHT shoulder faces the camera. We must see the FULL BODY in profile: side of the head, hair wrapping around the head, side of the torso and outfit, arms extending horizontally (one toward camera, one away), BOTH LEGS in profile, and SHOES/FEET clearly visible at the bottom.",
   }
 
-  const prompt = `You are creating a character model sheet (turnaround). This is the FRONT view of a 3D chibi character in T-pose. ${genderContext} The character has "${hairDescription}" and is wearing "${outfitDescription}".
+  const prompt = `You are creating a professional 3D CHARACTER MODEL SHEET (turnaround) for FULL BODY 3D model generation. This is the FRONT view of the character. Generate the ${perspective.label} view.
 
-CRITICAL RULES:
-- This is the SAME character, just seen from a different angle. Do NOT change ANY design detail.
-- The hair color, length, volume, and style must be IDENTICAL — just shown from the new angle.
-- The outfit design, color, and fit must be IDENTICAL — just shown from the new angle.
-- Keep the EXACT same body proportions, T-pose, 3D chibi style, background, and lighting.
-- Do NOT add or remove any accessories, patterns, or details.
+${genderContext} The character has "${hairDescription}" and is wearing "${outfitDescription}".
+
+CRITICAL - FULL BODY VISIBILITY:
+- The ENTIRE character must be visible: head, torso, both arms, both legs, and FEET/SHOES. Do NOT crop or cut off ANY body part.
+- The feet/shoes MUST be visible at the bottom. The head MUST be visible at the top.
+- The character occupies the same amount of space as in the front view — from head to feet.
+
+ABSOLUTE REQUIREMENTS FOR 3D TEXTURING CONSISTENCY:
+- This is the EXACT SAME character rotated to a different angle. NOT a new character.
+- BACKGROUND: Pure solid light gray (#D0D0D0). Identical to the front view. NO gradients, NO shadows, NO floor, NO ground plane.
+- COLORS: Use the EXACT SAME colors as the front view. Every color (skin tone, hair color, clothing color, shoe color) must be pixel-perfect identical.
+- LIGHTING: Same soft, even, uniform lighting as the front view. NO dramatic shadows.
+- SCALE & POSITION: Character must be the EXACT same size and centered in the EXACT same position as the front view. The top of the head and bottom of the feet must be at the same vertical positions.
+- PROPORTIONS: Identical body proportions, head size, limb length, leg length. The full silhouette height must match exactly.
+- POSE: Same T-pose. Arms at the same height and angle. Legs same stance.
+- EDGES: Clean, sharp boundaries between skin, hair, and clothing regions.
+- STYLE: Same clean 3D render style. NOT painterly, NOT sketchy.
 
 ${viewMap[perspective.key]}`
 
@@ -149,7 +163,32 @@ serve(async (req) => {
     const genderContext = base === "male"
       ? "This is a MALE character. Use masculine hairstyles and clothing appropriate for men."
       : "This is a FEMALE character. Use feminine hairstyles and clothing appropriate for women."
-    const frontPrompt = `You are modifying a 3D chibi character model in T-pose. ${genderContext} Using this character as reference: (1) Change the hair to: "${hairDescription}". (2) Dress the character in: "${outfitDescription}". Keep the EXACT same face, body proportions, and T-pose. Keep the same 3D chibi style. Only modify the hair and the clothing. Same background and lighting. Result must look like the same character with new hair and new outfit. Show the character from the FRONT view, facing directly towards the camera.`
+    const frontPrompt = `You are creating a professional 3D CHARACTER MODEL SHEET for a stylized character. This image will be used by an AI system to generate a FULL BODY 3D model, so the ENTIRE body from head to feet must be clearly visible.
+
+${genderContext}
+
+Using this base character as reference, make ONLY these changes:
+1. Change the hair to: "${hairDescription}"
+2. Dress the character in: "${outfitDescription}"
+
+CRITICAL - FULL BODY VISIBILITY:
+- The character must be shown as a COMPLETE FULL BODY figure: head, torso, both arms, both legs, and FEET/SHOES visible.
+- The FEET must be clearly visible at the bottom of the character. Do NOT crop or cut off any body part.
+- Use a slightly taller proportion than extreme chibi: head should be about 1/3 of total height (NOT 1/2). The body, legs, and feet must be substantial and clearly defined — not tiny.
+- Arms must be fully extended in T-pose, clearly visible from shoulder to fingertips.
+- Legs must be clearly separated, standing straight, with visible shoes/feet at the bottom.
+- Leave a small margin of empty background BELOW the feet and ABOVE the head.
+
+TECHNICAL REQUIREMENTS FOR 3D MODEL TEXTURING:
+- BACKGROUND: Pure solid light gray (#D0D0D0) background. NO gradients, NO shadows on background, NO floor, NO ground plane, NO environment.
+- POSE: Exact T-pose with arms extended perfectly horizontally. Legs straight, slightly apart.
+- COLORS: Use flat, solid, well-defined colors with good contrast. Each region (skin, hair, clothing, shoes) must have a distinct, clean, uniform color. The body and clothing must have STRONG contrast against the gray background.
+- LIGHTING: Soft, even, frontal lighting. NO dramatic shadows. The lighting must be perfectly uniform across the ENTIRE character from head to feet.
+- EDGES: Clean, sharp edges between different colored regions.
+- CENTERING: Character must be perfectly centered horizontally. Vertically, the full body should be centered with equal margins top and bottom.
+- SCALE: The FULL BODY (head to feet) should occupy approximately 85% of the image height, ensuring every body part is large enough to be clearly seen.
+- VIEW: FRONT view, character facing directly towards the camera.
+- STYLE: Clean 3D render look, like a game asset reference sheet. NOT a painting, NOT a sketch.`
 
     const ai = new GoogleGenAI({ apiKey: Deno.env.get("GEMINI_API_KEY")! })
 
@@ -209,7 +248,7 @@ serve(async (req) => {
       }
 
       const { base64, mimeType, ext } = (result as PromiseFulfilledResult<{ base64: string; mimeType: string; ext: string }>).value
-      const filePath = `${folderName}/${key}.${ext}`
+      const filePath = `${AVATARES_PRUEBA_PREFIX}/${folderName}/${key}.${ext}`
       const imageBytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 
       const { data: uploadData, error: uploadError } = await supabase.storage
@@ -259,12 +298,18 @@ serve(async (req) => {
         console.log("[generate-avatar] starting Meshy multi-image-to-3d with", imageUrls.length, "images:", JSON.stringify(imageUrls))
 
         try {
-          const meshyBody = {
+          const textureDesc = `Full body 3D stylized character with ${hairDescription} hair, wearing ${outfitDescription}, with visible shoes. Complete figure from head to feet. Clean solid colors, smooth skin, game-ready asset.`
+          const meshyBody: Record<string, unknown> = {
             image_urls: imageUrls,
+            ai_model: "meshy-6",
             should_texture: true,
+            enable_pbr: true,
             should_remesh: true,
             topology: "triangle",
             target_polycount: 30000,
+            symmetry_mode: "auto",
+            pose_mode: "t-pose",
+            texture_prompt: textureDesc.slice(0, 600),
           }
           const meshyRes = await fetch("https://api.meshy.ai/openapi/v1/multi-image-to-3d", {
             method: "POST",
