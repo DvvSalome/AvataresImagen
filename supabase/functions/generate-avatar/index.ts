@@ -298,7 +298,12 @@ TECHNICAL REQUIREMENTS FOR 3D MODEL TEXTURING:
         console.log("[generate-avatar] starting Meshy multi-image-to-3d with", imageUrls.length, "images:", JSON.stringify(imageUrls))
 
         try {
-          const textureDesc = `Full body 3D stylized character with ${hairDescription} hair, wearing ${outfitDescription}, with visible shoes. Complete figure from head to feet. Clean solid colors, smooth skin, game-ready asset.`
+          const textureDesc = [
+            `Full body 3D stylized character: ${hairDescription} hair, ${outfitDescription}, visible shoes.`,
+            "High quality, consistent texturing on ALL sides: front, back, left, right, top and bottom.",
+            "No artifacts or blur on occluded or barely visible areas; clean solid colors and smooth skin everywhere.",
+            "Uniform lighting and color matching across every angle. Game-ready, professional PBR texture.",
+          ].join(" ")
           const meshyBody: Record<string, unknown> = {
             image_urls: imageUrls,
             ai_model: "meshy-6",

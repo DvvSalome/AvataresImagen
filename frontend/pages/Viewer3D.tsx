@@ -28,6 +28,7 @@ const STATUS_LABELS: Record<Job3DStatus, string> = {
   creating_3d: 'Generando modelo 3D',
   remeshing: 'Optimizando geometría',
   texturing: 'Aplicando texturas',
+  rigging: 'Agregando esqueleto',
   completed: 'Modelo listo',
   error: 'Error en el proceso',
 };
@@ -36,11 +37,12 @@ const STATUS_DESCRIPTIONS: Record<Job3DStatus, string> = {
   creating_3d: 'Meshy está convirtiendo tus 4 vistas en un modelo 3D...',
   remeshing: 'Optimizando la malla del modelo para mejor calidad...',
   texturing: 'Aplicando colores y texturas al modelo 3D...',
-  completed: 'Tu chibi 3D está listo. Rotalo con el mouse o dedo.',
+  rigging: 'Generando esqueleto y animaciones básicas (walk/run)...',
+  completed: 'Tu avatar 3D con esqueleto está listo. Rotalo con el mouse o dedo.',
   error: 'Hubo un error procesando tu modelo.',
 };
 
-const STAGE_ORDER: Job3DStatus[] = ['creating_3d', 'remeshing', 'texturing', 'completed'];
+const STAGE_ORDER: Job3DStatus[] = ['creating_3d', 'remeshing', 'texturing', 'rigging', 'completed'];
 
 function getStageIndex(status: Job3DStatus): number {
   const idx = STAGE_ORDER.indexOf(status);

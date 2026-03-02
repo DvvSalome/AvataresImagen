@@ -36,6 +36,7 @@ export type Job3DStatus =
   | 'creating_3d'
   | 'remeshing'
   | 'texturing'
+  | 'rigging'
   | 'completed'
   | 'error';
 
@@ -47,5 +48,10 @@ export interface AvatarJob {
   status: Job3DStatus;
   model_url: string | null;
   error_message: string | null;
+  /** Escala para 1.7m: 1.0 = modelo a 1.7m, 0.85 = aplicar en cliente (modelo ~2u). */
+  escala?: number | null;
+  walking_url?: string | null;
+  running_url?: string | null;
+  idle_url?: string | null;
   created_at: string;
 }

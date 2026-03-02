@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import * as path from "https://deno.land/std@0.208.0/path/mod.ts"
+import { DenoIO } from "https://esm.sh/@gltf-transform/core@4"
+import { copyToDocument, unpartition } from "https://esm.sh/@gltf-transform/functions@4"
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -12,6 +15,7 @@ const corsHeaders: Record<string, string> = {
 const AVATARES_PRUEBA_PREFIX = "avataresPrueba"
 
 const MESHY_BASE = "https://api.meshy.ai/openapi/v1"
+const IDLE_ACTION_ID = 244
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -55,7 +59,7 @@ serve(async (req) => {
     }
 
     if (job.status === "completed" || job.status === "error") {
-      return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null)
+      return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null)
     }
 
     // ── STAGE 1: Poll 3D generation ──────────────────────────────────
@@ -146,7 +150,7 @@ serve(async (req) => {
         return respond("rigging", null, null, rigData.progress || 0)
       }
 
-      // Rigging succeeded — download rigged GLB
+      // Rigging succeeded — download rigged GLB and basic animations
       console.log("[check-3d] rigging SUCCEEDED, downloading rigged model...")
       const riggedGlbUrl = rigData.result?.rigged_character_glb_url
       if (!riggedGlbUrl) {
@@ -159,30 +163,110 @@ serve(async (req) => {
         return await downloadAndStoreModel(supabase, job, tdData.model_urls?.glb, jobId)
       }
 
-      // Solo subir el modelo 3D GLB (1.7m, sin animaciones). El sistema usará animaciones de Monica como fallback.
-      const storagePath = `${AVATARES_PRUEBA_PREFIX}/${job.folder_name}/model.glb`
-      const dlOk = await downloadToStorage(supabase, riggedGlbUrl, storagePath)
-      if (!dlOk) {
+      const folderPath = `${AVATARES_PRUEBA_PREFIX}/${job.folder_name}`
+      const storagePath = `${folderPath}/model.glb`
+
+      // Descargar modelo base y animaciones como bytes para fusionar en un solo GLB
+      const baseBytes = await downloadBytes(riggedGlbUrl)
+      if (!baseBytes) {
         await updateJob(supabase, jobId, { status: "error", error_message: "Error descargando modelo rigged" })
         return respond("error", null, "Error descargando modelo rigged")
       }
 
+      const walkUrl = rigData.result?.basic_animations?.walking_glb_url
+      const runUrl = rigData.result?.basic_animations?.running_glb_url
+      const walkBytes = walkUrl ? await downloadBytes(walkUrl) : null
+      const runBytes = runUrl ? await downloadBytes(runUrl) : null
+
+      let idleBytes: Uint8Array | null = null
+      if (job.meshy_rig_task_id) {
+        try {
+          idleBytes = await generateIdleAnimationAndGetBytes(job.meshy_rig_task_id, meshyHeaders)
+        } catch (idleErr) {
+          console.error("[check-3d] idle animation generation failed:", idleErr)
+        }
+      }
+
+      // Re-exportar: un solo model.glb con modelo + animaciones embebidas
+      let mergedBytes: Uint8Array | null = null
+      try {
+        mergedBytes = await mergeGlbWithAnimations(baseBytes, walkBytes, runBytes, idleBytes)
+      } catch (mergeErr) {
+        const msg = mergeErr instanceof Error ? mergeErr.message : String(mergeErr)
+        const stack = mergeErr instanceof Error ? mergeErr.stack : ""
+        console.error("[check-3d] merge GLB failed, falling back to separate files:", msg, stack)
+      }
+
+      if (mergedBytes && mergedBytes.length > 0) {
+        const { error: upErr } = await supabase.storage
+          .from("avatars")
+          .upload(storagePath, mergedBytes, { contentType: "model/gltf-binary", upsert: true })
+        if (upErr) {
+          console.error("[check-3d] upload merged model failed:", upErr.message)
+          mergedBytes = null
+        }
+      }
+
+      if (!mergedBytes) {
+        // Fallback: guardar modelo y animaciones por separado (filtradas para evitar deformación de cara)
+        console.log("[check-3d] storing model + anims as separate files (fallback)")
+        await downloadToStorage(supabase, riggedGlbUrl, storagePath)
+        if (walkBytes) {
+          const filtered = await filterFaceChannelsFromGlb(walkBytes)
+          await supabase.storage
+            .from("avatars")
+            .upload(`${folderPath}/anim_walking.glb`, filtered ?? walkBytes, {
+              contentType: "model/gltf-binary",
+              upsert: true,
+            })
+        }
+        if (runBytes) {
+          const filtered = await filterFaceChannelsFromGlb(runBytes)
+          await supabase.storage
+            .from("avatars")
+            .upload(`${folderPath}/anim_running.glb`, filtered ?? runBytes, {
+              contentType: "model/gltf-binary",
+              upsert: true,
+            })
+        }
+        if (idleBytes) {
+          const filtered = await filterFaceChannelsFromGlb(idleBytes)
+          await supabase.storage
+            .from("avatars")
+            .upload(`${folderPath}/anim_idle.glb`, filtered ?? idleBytes, {
+              contentType: "model/gltf-binary",
+              upsert: true,
+            })
+        }
+      }
+
       const publicModelUrl = supabase.storage.from("avatars").getPublicUrl(storagePath).data.publicUrl
+      const walkingUrl = mergedBytes ? null : (walkBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_walking.glb`).data.publicUrl : null)
+      const runningUrl = mergedBytes ? null : (runBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_running.glb`).data.publicUrl : null)
+      const idleUrl = mergedBytes ? null : (idleBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_idle.glb`).data.publicUrl : null)
       await updateJob(supabase, jobId, {
         status: "completed",
         model_url: publicModelUrl,
-        walking_url: null,
-        running_url: null,
+        walking_url: walkingUrl,
+        running_url: runningUrl,
+        idle_url: idleUrl,
         escala: 1.0,
       })
 
-      await deleteFolderFilesExceptModelGlb(supabase, `${AVATARES_PRUEBA_PREFIX}/${job.folder_name}`)
-      console.log("[check-3d] pipeline complete with rigging! Model at:", publicModelUrl, "escala: 1.0 (1.7m)")
-      return respond("completed", publicModelUrl, null, 100, 1.0)
+      const filesToKeep = mergedBytes
+        ? [MODEL_GLB_ONLY]
+        : ["model.glb", "anim_walking.glb", "anim_running.glb", "anim_idle.glb"]
+      await deleteFolderFilesExcept(supabase, folderPath, filesToKeep)
+      console.log(
+        "[check-3d] pipeline complete:",
+        mergedBytes ? "model.glb (animaciones embebidas)" : "model + 3 anims (fallback)",
+        "escala 1.0 (1.7m)",
+      )
+      return respond("completed", publicModelUrl, null, 100, 1.0, null)
     }
 
     // Fallback: unknown status, re-poll
-    return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null)
+    return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null)
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error"
@@ -204,6 +288,7 @@ function respond(
   errorMsg?: string | null,
   progress?: number,
   escala?: number | null,
+  idleUrl?: string | null,
 ) {
   return new Response(
     JSON.stringify({
@@ -212,6 +297,7 @@ function respond(
       model_url: modelUrl ?? null,
       error_message: errorMsg ?? null,
       escala: escala ?? null,
+      idle_url: idleUrl ?? null,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
   )
@@ -225,8 +311,14 @@ async function updateJob(supabase: any, jobId: string, updates: Record<string, u
   if (error) console.error("[check-3d] updateJob error:", error.message)
 }
 
-/** Elimina todos los archivos de la carpeta del avatar excepto model.glb. Deja solo el 3D al final del proceso. */
-async function deleteFolderFilesExceptModelGlb(supabase: any, folderPath: string): Promise<void> {
+const MODEL_GLB_ONLY = "model.glb"
+
+/** Elimina todo excepto los nombres indicados en keepFiles. */
+async function deleteFolderFilesExcept(
+  supabase: any,
+  folderPath: string,
+  keepFiles: string[],
+): Promise<void> {
   try {
     const { data: files, error: listErr } = await supabase.storage.from("avatars").list(folderPath)
     if (listErr) {
@@ -234,26 +326,38 @@ async function deleteFolderFilesExceptModelGlb(supabase: any, folderPath: string
       return
     }
     if (!files?.length) return
+    const keepSet = new Set(keepFiles)
     const toRemove = files
-      .filter((f: { name: string }) => f.name !== "model.glb")
+      .filter((f: { name: string }) => !keepSet.has(f.name))
       .map((f: { name: string }) => `${folderPath}/${f.name}`)
     if (toRemove.length === 0) return
     const { error: removeErr } = await supabase.storage.from("avatars").remove(toRemove)
-    if (removeErr) console.error("[check-3d] remove perspectives error:", removeErr.message)
-    else console.log("[check-3d] removed", toRemove.length, "files (solo queda model.glb)")
+    if (removeErr) console.error("[check-3d] remove extra files error:", removeErr.message)
+    else console.log("[check-3d] removed", toRemove.length, "files")
   } catch (e) {
-    console.error("[check-3d] deleteFolderFilesExceptModelGlb exception:", e)
+    console.error("[check-3d] deleteFolderFilesExcept exception:", e)
   }
 }
 
-async function downloadToStorage(supabase: any, url: string, storagePath: string): Promise<boolean> {
+/** Descarga una URL y devuelve los bytes, o null si falla. */
+async function downloadBytes(url: string): Promise<Uint8Array | null> {
   try {
     const res = await fetch(url)
     if (!res.ok) {
       console.error("[check-3d] download failed:", url, res.status)
-      return false
+      return null
     }
-    const bytes = new Uint8Array(await res.arrayBuffer())
+    return new Uint8Array(await res.arrayBuffer())
+  } catch (e) {
+    console.error("[check-3d] downloadBytes exception:", e)
+    return null
+  }
+}
+
+async function downloadToStorage(supabase: any, url: string, storagePath: string): Promise<boolean> {
+  const bytes = await downloadBytes(url)
+  if (!bytes) return false
+  try {
     const { error } = await supabase.storage
       .from("avatars")
       .upload(storagePath, bytes, { contentType: "model/gltf-binary", upsert: true })
@@ -284,7 +388,165 @@ async function downloadAndStoreModel(supabase: any, job: any, glbUrl: string | u
   const publicModelUrl = supabase.storage.from("avatars").getPublicUrl(storagePath).data.publicUrl
   await updateJob(supabase, jobId, { status: "completed", model_url: publicModelUrl, escala: 0.85 })
 
-  await deleteFolderFilesExceptModelGlb(supabase, `${AVATARES_PRUEBA_PREFIX}/${job.folder_name}`)
+  await deleteFolderFilesExcept(supabase, `${AVATARES_PRUEBA_PREFIX}/${job.folder_name}`, [
+    MODEL_GLB_ONLY,
+  ])
   console.log("[check-3d] pipeline complete (no rigging). Model at:", publicModelUrl, "escala: 0.85 (modelo ~2u)")
-  return respond("completed", publicModelUrl, null, 100, 0.85)
+  return respond("completed", publicModelUrl, null, 100, 0.85, null)
+}
+
+/** Genera la animación idle en Meshy y devuelve el GLB en bytes (sin subir a Storage). */
+async function generateIdleAnimationAndGetBytes(
+  rigTaskId: string,
+  meshyHeaders: Record<string, string>,
+): Promise<Uint8Array | null> {
+  console.log("[check-3d] starting idle animation generation...", { rigTaskId, actionId: IDLE_ACTION_ID })
+
+  const startRes = await fetch(`${MESHY_BASE}/animations`, {
+    method: "POST",
+    headers: { ...meshyHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rig_task_id: rigTaskId,
+      action_id: IDLE_ACTION_ID,
+    }),
+  })
+
+  const startData = await startRes.json()
+  if (!startRes.ok) {
+    console.error("[check-3d] idle animation start failed:", JSON.stringify(startData))
+    return null
+  }
+
+  const animationTaskId = startData.result
+  if (!animationTaskId) {
+    console.error("[check-3d] idle animation start did not return task id")
+    return null
+  }
+
+  const maxAttempts = 20
+  const delayMs = 3000
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const pollRes = await fetch(`${MESHY_BASE}/animations/${animationTaskId}`, {
+      headers: meshyHeaders,
+    })
+    const pollData = await pollRes.json()
+
+    if (!pollRes.ok) {
+      console.error("[check-3d] idle animation poll error:", JSON.stringify(pollData))
+      return null
+    }
+
+    if (isFailed(pollData.status)) {
+      console.error("[check-3d] idle animation failed")
+      return null
+    }
+
+    if (pollData.status === "SUCCEEDED") {
+      const idleGlbUrl = pollData.result?.animation_glb_url
+      if (!idleGlbUrl) return null
+      const bytes = await downloadBytes(idleGlbUrl)
+      if (bytes) console.log("[check-3d] idle animation GLB downloaded for merge")
+      return bytes
+    }
+
+    await sleep(delayMs)
+  }
+
+  console.warn("[check-3d] idle animation polling timeout")
+  return null
+}
+
+/** Nodos que pueden deformar la cara si se animan (walk/run). Los excluimos del merge. */
+const FACE_HEAD_BONE_PATTERNS = [
+  "head", "neck", "jaw", "face", "eye", "skull", "cabeza", "cuello", "mandibula",
+  "cc_base_head", "cc_base_neck", "mixamorighead", "mixamorigneck",
+  "armature_head", "armature_neck", "bone_head", "bone_neck",
+]
+
+function isFaceOrHeadBone(nodeName: string): boolean {
+  const lower = nodeName.toLowerCase()
+  return FACE_HEAD_BONE_PATTERNS.some((p) => lower.includes(p))
+}
+
+/** Quita canales de cabeza/cara de un GLB animado para evitar deformación. Devuelve null si falla. */
+async function filterFaceChannelsFromGlb(glbBytes: Uint8Array): Promise<Uint8Array | null> {
+  try {
+    const io = new DenoIO(path)
+    const doc = await io.readBinary(glbBytes)
+    const root = doc.getRoot()
+    let removed = 0
+    for (const anim of root.listAnimations()) {
+      const toRemove = anim.listChannels().filter((ch) => {
+        const target = ch.getTargetNode()
+        return target && isFaceOrHeadBone(target.getName() ?? "")
+      })
+      for (const ch of toRemove) {
+        anim.removeChannel(ch)
+        removed++
+      }
+    }
+    if (removed > 0) console.log("[check-3d] filtered", removed, "face/head animation channels")
+    return await io.writeBinary(doc)
+  } catch (e) {
+    console.error("[check-3d] filterFaceChannelsFromGlb failed:", e)
+    return null
+  }
+}
+
+/**
+ * Fusiona el modelo base (rigged, sin animaciones) con las animaciones walk/run/idle
+ * en un solo GLB con animaciones embebidas. Usa glTF-Transform.
+ * Excluye canales que animan cabeza/cara para evitar deformación (cara ancha al caminar).
+ */
+async function mergeGlbWithAnimations(
+  baseBytes: Uint8Array,
+  walkBytes: Uint8Array | null,
+  runBytes: Uint8Array | null,
+  idleBytes: Uint8Array | null,
+): Promise<Uint8Array | null> {
+  const io = new DenoIO(path)
+  const baseDoc = await io.readBinary(baseBytes)
+
+  const root = baseDoc.getRoot()
+  const nameToNode = new Map<string, ReturnType<typeof root.listNodes>[number]>()
+  for (const node of root.listNodes()) {
+    const n = node.getName()
+    if (n) nameToNode.set(n, node)
+  }
+
+  const animatedGlbs: (Uint8Array | null)[] = [walkBytes, runBytes, idleBytes]
+  for (const glbBytes of animatedGlbs) {
+    if (!glbBytes || glbBytes.length === 0) continue
+    const sourceDoc = await io.readBinary(glbBytes)
+    const anims = sourceDoc.getRoot().listAnimations()
+    if (anims.length === 0) continue
+
+    const beforeIds = new Set(root.listAnimations())
+    copyToDocument(baseDoc, sourceDoc, anims)
+
+    for (const anim of root.listAnimations()) {
+      if (beforeIds.has(anim)) continue
+      const channelsToRemove: ReturnType<typeof anim.listChannels>[number][] = []
+      for (const ch of anim.listChannels()) {
+        const target = ch.getTargetNode()
+        if (!target) continue
+        const name = target.getName() ?? ""
+        if (isFaceOrHeadBone(name)) {
+          channelsToRemove.push(ch)
+          continue
+        }
+        const baseNode = nameToNode.get(name)
+        if (baseNode) ch.setTargetNode(baseNode)
+      }
+      for (const ch of channelsToRemove) anim.removeChannel(ch)
+    }
+  }
+
+  await baseDoc.transform(unpartition())
+  return await io.writeBinary(baseDoc)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

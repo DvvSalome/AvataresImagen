@@ -32,6 +32,7 @@ export async function generateChibiAvatarViaEdgeFunction(
   const response = data as GenerateAvatarResponse | null;
   const serverMessage = response?.error;
   if (fnError) {
+    console.error('[generate-avatar] fnError:', fnError, 'response body:', data);
     throw new Error(serverMessage || fnError.message);
   }
   if (response?.error) throw new Error(response.error);
