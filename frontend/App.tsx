@@ -7,7 +7,7 @@ import { generateChibiAvatarViaEdgeFunction } from './services/avatarService';
 import { Button } from './components/Button';
 
 // URLs de las imágenes base en Storage
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://ejzyhwfpmjpwvfmpvfxo.supabase.co';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://lcryrsdyrzotjqdxcwtp.supabase.co';
 const BASE_IMAGES = {
   female: `${SUPABASE_URL}/storage/v1/object/public/avatars/bases/base_female.jpg`,
   male: `${SUPABASE_URL}/storage/v1/object/public/avatars/bases/base_male.jpg`,

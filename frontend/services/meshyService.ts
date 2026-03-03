@@ -10,6 +10,8 @@ export interface Check3DResponse {
   escala: number | null;
   /** URL pública de la animación idle (Meshy Animation API, action_id = 244). */
   idle_url: string | null;
+  walking_url?: string | null;
+  running_url?: string | null;
 }
 
 export async function check3DStatus(jobId: string): Promise<Check3DResponse> {

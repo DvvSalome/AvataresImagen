@@ -2,7 +2,10 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { check3DStatus, Check3DResponse } from '../services/meshyService';
 import type { Job3DStatus } from '../types';
-import '@google/model-viewer';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, Environment, ContactShadows } from '@react-three/drei';
+import { AvatarModel } from '../components/AvatarModel';
+import * as THREE from 'three';
 
 declare global {
   namespace JSX {
@@ -49,23 +52,47 @@ function getStageIndex(status: Job3DStatus): number {
   return idx === -1 ? 0 : idx;
 }
 
+type AnimationName = 'idle' | 'walking' | 'running';
+
 const Viewer3D: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();
   const [status, setStatus] = useState<Job3DStatus>('creating_3d');
   const [progress, setProgress] = useState<number>(0);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [idleUrl, setIdleUrl] = useState<string | null>(null);
+  const [walkingUrl, setWalkingUrl] = useState<string | null>(null);
+  const [runningUrl, setRunningUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [animation, setAnimation] = useState<AnimationName>('idle');
+  const [animationsAvailable, setAnimationsAvailable] = useState<Record<AnimationName, boolean>>({
+    idle: false,
+    walking: false,
+    running: false,
+  });
   const intervalRef = useRef<number | null>(null);
 
   const poll = useCallback(async () => {
     if (!jobId) return;
     try {
       const res: Check3DResponse = await check3DStatus(jobId);
+      console.log('[Viewer3D] Poll response:', res);
       setStatus(res.status);
       setProgress(res.progress ?? 0);
 
       if (res.status === 'completed' && res.model_url) {
+        console.log('[Viewer3D] Model completed. URLs:', {
+          model_url: res.model_url,
+          idle_url: res.idle_url,
+          walking_url: res.walking_url,
+          running_url: res.running_url,
+          escala: res.escala
+        });
         setModelUrl(res.model_url);
+        setIdleUrl(res.idle_url ?? null);
+        setWalkingUrl(res.walking_url ?? null);
+        setRunningUrl(res.running_url ?? null);
+        setAnimationsAvailable({ idle: false, walking: false, running: false });
+        setAnimation('idle');
         if (intervalRef.current) clearInterval(intervalRef.current);
       }
       if (res.status === 'error') {
@@ -84,6 +111,14 @@ const Viewer3D: React.FC = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [poll]);
+
+  useEffect(() => {
+    if (animationsAvailable[animation]) return;
+    const fallback = (['idle', 'walking', 'running'] as AnimationName[]).find(name => animationsAvailable[name]);
+    if (fallback && fallback !== animation) {
+      setAnimation(fallback);
+    }
+  }, [animationsAvailable, animation]);
 
   const overallProgress = () => {
     const stageIdx = getStageIndex(status);
@@ -206,17 +241,52 @@ const Viewer3D: React.FC = () => {
               <p className="text-slate-500 text-sm">Arrastra para rotar, scroll para zoom</p>
             </div>
 
+            <div className="flex gap-2 justify-center mb-4">
+              <button 
+                onClick={() => setAnimation('idle')}
+                disabled={!animationsAvailable.idle}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${animation === 'idle' ? 'bg-violet-600 text-white' : animationsAvailable.idle ? 'bg-slate-200 text-slate-700 hover:bg-slate-300' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+              >
+                Idle {!animationsAvailable.idle && '(Cargando)'}
+              </button>
+              <button 
+                  onClick={() => setAnimation('walking')}
+                  disabled={!animationsAvailable.walking}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${animation === 'walking' ? 'bg-violet-600 text-white' : animationsAvailable.walking ? 'bg-slate-200 text-slate-700 hover:bg-slate-300' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                >
+                  Caminar {!animationsAvailable.walking && '(No disponible)'}
+                </button>
+              <button 
+                  onClick={() => setAnimation('running')}
+                  disabled={!animationsAvailable.running}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${animation === 'running' ? 'bg-violet-600 text-white' : animationsAvailable.running ? 'bg-slate-200 text-slate-700 hover:bg-slate-300' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                >
+                  Correr {!animationsAvailable.running && '(No disponible)'}
+                </button>
+            </div>
+
             <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden" style={{ height: '70vh' }}>
-              <model-viewer
-                src={modelUrl}
-                alt="Avatar Chibi 3D"
-                camera-controls
-                auto-rotate
-                shadow-intensity="1"
-                environment-image="neutral"
-                exposure="1"
-                style={{ width: '100%', height: '100%' }}
-              />
+              <div style={{ width: '100%', height: '100%', backgroundColor: '#f0f0f0' }}>
+                <Canvas
+                  camera={{ position: [0, 1, 3], fov: 45, near: 0.01, far: 100 }}
+                  gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
+                  dpr={[1, 2]}
+                >
+                  <ambientLight intensity={0.5} />
+                  <directionalLight position={[10, 10, 5]} intensity={1} />
+                  
+                  <AvatarModel 
+                    modelUrl={modelUrl}
+                    idleUrl={idleUrl}
+                    walkingUrl={walkingUrl}
+                    runningUrl={runningUrl}
+                    animation={animation}
+                    onAnimationsReady={(availability) => setAnimationsAvailable(availability)}
+                  />
+                  
+                  <OrbitControls target={[0, 0.8, 0]} autoRotate />
+                </Canvas>
+              </div>
             </div>
 
             <div className="flex items-center justify-center gap-4">

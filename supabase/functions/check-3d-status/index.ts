@@ -59,7 +59,7 @@ serve(async (req) => {
     }
 
     if (job.status === "completed" || job.status === "error") {
-      return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null)
+      return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null, job.walking_url ?? null, job.running_url ?? null)
     }
 
     // ── STAGE 1: Poll 3D generation ──────────────────────────────────
@@ -230,7 +230,7 @@ serve(async (req) => {
             })
         }
         if (idleBytes) {
-          const filtered = await filterFaceChannelsFromGlb(idleBytes)
+          const filtered = await filterFaceChannelsFromGlb(idleBytes, { skipFaceFilter: true })
           await supabase.storage
             .from("avatars")
             .upload(`${folderPath}/anim_idle.glb`, filtered ?? idleBytes, {
@@ -262,11 +262,11 @@ serve(async (req) => {
         mergedBytes ? "model.glb (animaciones embebidas)" : "model + 3 anims (fallback)",
         "escala 1.0 (1.7m)",
       )
-      return respond("completed", publicModelUrl, null, 100, 1.0, null)
+      return respond("completed", publicModelUrl, null, 100, 1.0, idleUrl, walkingUrl, runningUrl)
     }
 
     // Fallback: unknown status, re-poll
-    return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null)
+    return respond(job.status, job.model_url, job.error_message, undefined, job.escala ?? null, job.idle_url ?? null, job.walking_url ?? null, job.running_url ?? null)
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error"
@@ -289,6 +289,8 @@ function respond(
   progress?: number,
   escala?: number | null,
   idleUrl?: string | null,
+  walkingUrl?: string | null,
+  runningUrl?: string | null,
 ) {
   return new Response(
     JSON.stringify({
@@ -298,17 +300,51 @@ function respond(
       error_message: errorMsg ?? null,
       escala: escala ?? null,
       idle_url: idleUrl ?? null,
+      walking_url: walkingUrl ?? null,
+      running_url: runningUrl ?? null,
     }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } },
   )
 }
 
 async function updateJob(supabase: any, jobId: string, updates: Record<string, unknown>) {
+  // Try different update strategies to handle missing columns gracefully
+  const baseUpdate = { updated_at: new Date().toISOString() }
+  
+  // Strategy 1: Try full update
+  try {
+    const { error } = await supabase
+      .from("avatar_jobs")
+      .update({ ...updates, ...baseUpdate })
+      .eq("id", jobId)
+    if (!error) return
+    console.log("[check-3d] Full update failed, trying without optional columns")
+  } catch (e) {
+    console.log("[check-3d] Full update exception, trying minimal")
+  }
+  
+  // Strategy 2: Try without escala and idle_url (common missing columns)
+  try {
+    const { status, model_url, walking_url, running_url, ...rest } = updates
+    const minimalUpdate = { status, model_url, walking_url, running_url, ...baseUpdate }
+    const { error } = await supabase
+      .from("avatar_jobs")
+      .update(minimalUpdate)
+      .eq("id", jobId)
+    if (!error) return
+    console.log("[check-3d] Update without escala/idle_url failed, trying core only")
+  } catch (e) {
+    console.log("[check-3d] Update without optional columns exception, trying core only")
+  }
+  
+  // Strategy 3: Try only core columns that should always exist
+  const { status, model_url } = updates
+  const coreUpdate = { status, model_url, ...baseUpdate }
   const { error } = await supabase
     .from("avatar_jobs")
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(coreUpdate)
     .eq("id", jobId)
-  if (error) console.error("[check-3d] updateJob error:", error.message)
+  if (error) throw error
 }
 
 const MODEL_GLB_ONLY = "model.glb"
@@ -469,8 +505,13 @@ function isFaceOrHeadBone(nodeName: string): boolean {
   return FACE_HEAD_BONE_PATTERNS.some((p) => lower.includes(p))
 }
 
+interface FaceFilterOptions {
+  skipFaceFilter?: boolean
+}
+
 /** Quita canales de cabeza/cara de un GLB animado para evitar deformación. Devuelve null si falla. */
-async function filterFaceChannelsFromGlb(glbBytes: Uint8Array): Promise<Uint8Array | null> {
+async function filterFaceChannelsFromGlb(glbBytes: Uint8Array, options?: FaceFilterOptions): Promise<Uint8Array | null> {
+  if (options?.skipFaceFilter) return glbBytes
   try {
     const io = new DenoIO(path)
     const doc = await io.readBinary(glbBytes)
@@ -515,8 +556,13 @@ async function mergeGlbWithAnimations(
     if (n) nameToNode.set(n, node)
   }
 
-  const animatedGlbs: (Uint8Array | null)[] = [walkBytes, runBytes, idleBytes]
-  for (const glbBytes of animatedGlbs) {
+  const animatedGlbs: [Uint8Array | null, "walking" | "running" | "idle"][] = [
+    [walkBytes, "walking"],
+    [runBytes, "running"],
+    [idleBytes, "idle"],
+  ]
+
+  for (const [glbBytes, clipName] of animatedGlbs) {
     if (!glbBytes || glbBytes.length === 0) continue
     const sourceDoc = await io.readBinary(glbBytes)
     const anims = sourceDoc.getRoot().listAnimations()
@@ -527,12 +573,14 @@ async function mergeGlbWithAnimations(
 
     for (const anim of root.listAnimations()) {
       if (beforeIds.has(anim)) continue
+      anim.setName(clipName)
+      const filterFaceChannels = clipName === "walking" || clipName === "running"
       const channelsToRemove: ReturnType<typeof anim.listChannels>[number][] = []
       for (const ch of anim.listChannels()) {
         const target = ch.getTargetNode()
         if (!target) continue
         const name = target.getName() ?? ""
-        if (isFaceOrHeadBone(name)) {
+        if (filterFaceChannels && isFaceOrHeadBone(name)) {
           channelsToRemove.push(ch)
           continue
         }
