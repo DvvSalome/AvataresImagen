@@ -269,11 +269,21 @@ const Viewer3D: React.FC = () => {
               <div style={{ width: '100%', height: '100%', backgroundColor: '#f0f0f0' }}>
                 <Canvas
                   camera={{ position: [0, 1, 3], fov: 45, near: 0.01, far: 100 }}
-                  gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
-                  dpr={[1, 2]}
+                  gl={{ antialias: true, toneMapping: THREE.AgXToneMapping, toneMappingExposure: 1.0, powerPreference: 'high-performance' }}
+                  dpr={[1, 2.5]}
                 >
-                  <ambientLight intensity={0.5} />
-                  <directionalLight position={[10, 10, 5]} intensity={1} />
+                  {/* Soft ambient base */}
+                  <ambientLight intensity={0.35} />
+                  {/* Key light */}
+                  <directionalLight position={[5, 8, 5]} intensity={1.2} castShadow />
+                  {/* Fill light from opposite side to soften shadows */}
+                  <directionalLight position={[-4, 4, -3]} intensity={0.4} />
+                  {/* Hemisphere for natural sky/ground gradient */}
+                  <hemisphereLight args={['#b1e1ff', '#b97a20', 0.3]} />
+                  {/* Environment for PBR reflections */}
+                  <Environment preset="city" />
+                  {/* Ground shadow for depth */}
+                  <ContactShadows position={[0, 0, 0]} opacity={0.4} scale={4} blur={2.5} far={1.5} />
                   
                   <AvatarModel 
                     modelUrl={modelUrl}

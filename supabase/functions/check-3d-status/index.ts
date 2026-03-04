@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import * as path from "https://deno.land/std@0.208.0/path/mod.ts"
-import { DenoIO } from "https://esm.sh/@gltf-transform/core@4"
+import { DenoIO, Accessor as GltfAccessor } from "https://esm.sh/@gltf-transform/core@4"
 import { copyToDocument, unpartition } from "https://esm.sh/@gltf-transform/functions@4"
 
 const corsHeaders: Record<string, string> = {
@@ -208,61 +208,69 @@ serve(async (req) => {
       }
 
       if (!mergedBytes) {
-        // Fallback: guardar modelo y animaciones por separado (filtradas para evitar deformación de cara)
-        console.log("[check-3d] storing model + anims as separate files (fallback)")
-        await downloadToStorage(supabase, riggedGlbUrl, storagePath)
-        if (walkBytes) {
-          const filtered = await filterFaceChannelsFromGlb(walkBytes)
-          await supabase.storage
-            .from("avatars")
-            .upload(`${folderPath}/anim_walking.glb`, filtered ?? walkBytes, {
-              contentType: "model/gltf-binary",
-              upsert: true,
-            })
+        // Fallback: intentar embeber animaciones en el modelo base con una estrategia simplificada.
+        // El cowork solo carga model.glb, así que NECESITAMOS animaciones embebidas.
+        console.log("[check-3d] merge failed, attempting simplified embed of animations into model.glb")
+        let fallbackBytes: Uint8Array | null = null
+        try {
+          fallbackBytes = await embedAnimationsIntoBase(baseBytes, walkBytes, runBytes, idleBytes)
+        } catch (embedErr) {
+          console.error("[check-3d] simplified embed also failed:", embedErr)
         }
-        if (runBytes) {
-          const filtered = await filterFaceChannelsFromGlb(runBytes)
-          await supabase.storage
+
+        if (fallbackBytes && fallbackBytes.length > 0) {
+          const { error: upErr } = await supabase.storage
             .from("avatars")
-            .upload(`${folderPath}/anim_running.glb`, filtered ?? runBytes, {
-              contentType: "model/gltf-binary",
-              upsert: true,
-            })
+            .upload(storagePath, fallbackBytes, { contentType: "model/gltf-binary", upsert: true })
+          if (upErr) {
+            console.error("[check-3d] upload fallback model failed:", upErr.message)
+            fallbackBytes = null
+          }
         }
-        if (idleBytes) {
-          const filtered = await filterFaceChannelsFromGlb(idleBytes, { skipFaceFilter: true })
-          await supabase.storage
-            .from("avatars")
-            .upload(`${folderPath}/anim_idle.glb`, filtered ?? idleBytes, {
-              contentType: "model/gltf-binary",
-              upsert: true,
-            })
+
+        if (!fallbackBytes) {
+          // Last resort: upload raw rigged model with synthetic idle only
+          console.log("[check-3d] last resort — uploading base model with synthetic idle")
+          let lastResortBytes: Uint8Array | null = null
+          try {
+            const io = new DenoIO(path)
+            const doc = await io.readBinary(baseBytes)
+            createSyntheticIdleAnimation(doc)
+            await doc.transform(unpartition())
+            lastResortBytes = await io.writeBinary(doc)
+          } catch (e) {
+            console.error("[check-3d] synthetic idle injection failed:", e)
+          }
+
+          if (lastResortBytes && lastResortBytes.length > 0) {
+            await supabase.storage
+              .from("avatars")
+              .upload(storagePath, lastResortBytes, { contentType: "model/gltf-binary", upsert: true })
+          } else {
+            // Absolute last resort: raw model without animations
+            await downloadToStorage(supabase, riggedGlbUrl, storagePath)
+          }
         }
       }
 
       const publicModelUrl = supabase.storage.from("avatars").getPublicUrl(storagePath).data.publicUrl
-      const walkingUrl = mergedBytes ? null : (walkBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_walking.glb`).data.publicUrl : null)
-      const runningUrl = mergedBytes ? null : (runBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_running.glb`).data.publicUrl : null)
-      const idleUrl = mergedBytes ? null : (idleBytes ? supabase.storage.from("avatars").getPublicUrl(`${folderPath}/anim_idle.glb`).data.publicUrl : null)
+      // Animations are always embedded in model.glb now (both merge and fallback paths)
       await updateJob(supabase, jobId, {
         status: "completed",
         model_url: publicModelUrl,
-        walking_url: walkingUrl,
-        running_url: runningUrl,
-        idle_url: idleUrl,
+        walking_url: null,
+        running_url: null,
+        idle_url: null,
         escala: 1.0,
       })
 
-      const filesToKeep = mergedBytes
-        ? [MODEL_GLB_ONLY]
-        : ["model.glb", "anim_walking.glb", "anim_running.glb", "anim_idle.glb"]
-      await deleteFolderFilesExcept(supabase, folderPath, filesToKeep)
+      await deleteFolderFilesExcept(supabase, folderPath, [MODEL_GLB_ONLY])
       console.log(
         "[check-3d] pipeline complete:",
-        mergedBytes ? "model.glb (animaciones embebidas)" : "model + 3 anims (fallback)",
-        "escala 1.0 (1.7m)",
+        mergedBytes ? "model.glb (merge completo)" : "model.glb (fallback embed)",
+        "escala 1.0 (1.7m), idle siempre incluido",
       )
-      return respond("completed", publicModelUrl, null, 100, 1.0, idleUrl, walkingUrl, runningUrl)
+      return respond("completed", publicModelUrl, null, 100, 1.0, null, null, null)
     }
 
     // Fallback: unknown status, re-poll
@@ -493,16 +501,31 @@ async function generateIdleAnimationAndGetBytes(
   return null
 }
 
-/** Nodos que pueden deformar la cara si se animan (walk/run). Los excluimos del merge. */
-const FACE_HEAD_BONE_PATTERNS = [
+/** Nodos que pueden deformar la cara si se animan (walk/run). Los excluimos del merge.
+ *  On chibi models shoulder/arm skin weights bleed into the head, so we also
+ *  strip spine, shoulder, arm, hand, and finger channels from locomotion clips.
+ *  Only hips + legs should animate during walk/run.
+ */
+const UPPER_BODY_BONE_PATTERNS = [
+  // Head & face
   "head", "neck", "jaw", "face", "eye", "skull", "cabeza", "cuello", "mandibula",
   "cc_base_head", "cc_base_neck", "mixamorighead", "mixamorigneck",
   "armature_head", "armature_neck", "bone_head", "bone_neck",
+  // Spine (propagates to head)
+  "spine",
+  // Arms & shoulders (skin weights bleed into face on chibi)
+  "shoulder", "clavicle", "arm", "forearm", "hand", "finger", "thumb",
+  "elbow", "wrist",
 ]
+
+/** Root bone patterns that must NOT be filtered even though they contain 'arm' substring (e.g. 'armature'). */
+const ROOT_BONE_EXCLUSIONS = ["armature", "root", "hips", "pelvis"]
 
 function isFaceOrHeadBone(nodeName: string): boolean {
   const lower = nodeName.toLowerCase()
-  return FACE_HEAD_BONE_PATTERNS.some((p) => lower.includes(p))
+  // Never filter root/hips bones — they are essential for locomotion
+  if (ROOT_BONE_EXCLUSIONS.some((r) => lower === r || lower.startsWith(r + "_") || lower.endsWith("_" + r))) return false
+  return UPPER_BODY_BONE_PATTERNS.some((p) => lower.includes(p))
 }
 
 interface FaceFilterOptions {
@@ -536,9 +559,109 @@ async function filterFaceChannelsFromGlb(glbBytes: Uint8Array, options?: FaceFil
 }
 
 /**
+ * Mapeo de nombres de huesos conocidos entre Mixamo y Meshy rig.
+ * Clave: nombre sin prefijo "mixamorig" (case-insensitive), Valor: posibles nombres en Meshy.
+ */
+const BONE_ALIASES: Record<string, string[]> = {
+  "hips": ["Hips", "hips"],
+  "spine": ["Spine", "spine"],
+  "spine1": ["Spine01", "spine01", "Spine1"],
+  "spine2": ["Spine02", "spine02", "Spine2"],
+  "neck": ["neck", "Neck"],
+  "head": ["Head", "head"],
+  "headtop_end": ["head_end", "headfront", "HeadTop_End"],
+  "leftshoulder": ["LeftShoulder", "leftshoulder"],
+  "leftarm": ["LeftArm", "leftarm"],
+  "leftforearm": ["LeftForeArm", "leftforearm", "LeftForearm"],
+  "lefthand": ["LeftHand", "lefthand"],
+  "rightshoulder": ["RightShoulder", "rightshoulder"],
+  "rightarm": ["RightArm", "rightarm"],
+  "rightforearm": ["RightForeArm", "rightforearm", "RightForearm"],
+  "righthand": ["RightHand", "righthand"],
+  "leftupleg": ["LeftUpLeg", "leftupleg"],
+  "leftleg": ["LeftLeg", "leftleg"],
+  "leftfoot": ["LeftFoot", "leftfoot"],
+  "lefttoebase": ["LeftToeBase", "lefttoebase"],
+  "rightupleg": ["RightUpLeg", "rightupleg"],
+  "rightleg": ["RightLeg", "rightleg"],
+  "rightfoot": ["RightFoot", "rightfoot"],
+  "righttoebase": ["RightToeBase", "righttoebase"],
+}
+
+/**
+ * Construye un resolver que mapea nombres de huesos de animación (ej. mixamorigHips)
+ * a nodos del modelo base (ej. Hips). Soporta:
+ * 1. Match exacto
+ * 2. Strip prefijo "mixamorig" + match exacto
+ * 3. Alias conocidos (Spine2→Spine02, HeadTop_End→head_end, etc.)
+ * 4. Match case-insensitive
+ */
+function buildBoneResolver(
+  nameToNode: Map<string, any>,
+): (animBoneName: string) => any | null {
+  // Build lowercase→node map for case-insensitive fallback
+  const lowerToNode = new Map<string, any>()
+  for (const [name, node] of nameToNode) {
+    lowerToNode.set(name.toLowerCase(), node)
+  }
+
+  const cache = new Map<string, any | null>()
+
+  return (animBoneName: string) => {
+    if (cache.has(animBoneName)) return cache.get(animBoneName)!
+
+    let resolved = null
+
+    // 1. Exact match
+    if (nameToNode.has(animBoneName)) {
+      resolved = nameToNode.get(animBoneName)
+    }
+
+    // 2. Strip "mixamorig" prefix
+    if (!resolved) {
+      const stripped = animBoneName.replace(/^mixamorig/i, "")
+      if (stripped && nameToNode.has(stripped)) {
+        resolved = nameToNode.get(stripped)
+      }
+
+      // 3. Use known aliases
+      if (!resolved && stripped) {
+        const aliasKey = stripped.toLowerCase()
+        const aliases = BONE_ALIASES[aliasKey]
+        if (aliases) {
+          for (const alias of aliases) {
+            if (nameToNode.has(alias)) {
+              resolved = nameToNode.get(alias)
+              break
+            }
+          }
+        }
+      }
+
+      // 4. Case-insensitive fallback on stripped name
+      if (!resolved && stripped) {
+        resolved = lowerToNode.get(stripped.toLowerCase()) ?? null
+      }
+    }
+
+    // 5. Case-insensitive fallback on full name
+    if (!resolved) {
+      resolved = lowerToNode.get(animBoneName.toLowerCase()) ?? null
+    }
+
+    cache.set(animBoneName, resolved)
+    return resolved
+  }
+}
+
+/**
  * Fusiona el modelo base (rigged, sin animaciones) con las animaciones walk/run/idle
  * en un solo GLB con animaciones embebidas. Usa glTF-Transform.
  * Excluye canales que animan cabeza/cara para evitar deformación (cara ancha al caminar).
+ *
+ * IMPORTANTE: Si idleBytes es null (generación Meshy falló), se crea una animación idle
+ * sintética desde el bind pose del esqueleto para que el GLB SIEMPRE tenga un clip "idle".
+ * Esto evita T-pose en el cowork Spatial World.
  */
 async function mergeGlbWithAnimations(
   baseBytes: Uint8Array,
@@ -556,11 +679,16 @@ async function mergeGlbWithAnimations(
     if (n) nameToNode.set(n, node)
   }
 
+  // Build fuzzy resolver for Mixamo → model bone name mapping
+  const resolveNode = buildBoneResolver(nameToNode)
+
   const animatedGlbs: [Uint8Array | null, "walking" | "running" | "idle"][] = [
     [walkBytes, "walking"],
     [runBytes, "running"],
     [idleBytes, "idle"],
   ]
+
+  let hasIdle = false
 
   for (const [glbBytes, clipName] of animatedGlbs) {
     if (!glbBytes || glbBytes.length === 0) continue
@@ -574,8 +702,11 @@ async function mergeGlbWithAnimations(
     for (const anim of root.listAnimations()) {
       if (beforeIds.has(anim)) continue
       anim.setName(clipName)
+      if (clipName === "idle") hasIdle = true
       const filterFaceChannels = clipName === "walking" || clipName === "running"
       const channelsToRemove: ReturnType<typeof anim.listChannels>[number][] = []
+      let mapped = 0, unmapped = 0
+      const unmappedNames: string[] = []
       for (const ch of anim.listChannels()) {
         const target = ch.getTargetNode()
         if (!target) continue
@@ -584,15 +715,178 @@ async function mergeGlbWithAnimations(
           channelsToRemove.push(ch)
           continue
         }
-        const baseNode = nameToNode.get(name)
-        if (baseNode) ch.setTargetNode(baseNode)
+        const baseNode = resolveNode(name)
+        if (baseNode) {
+          ch.setTargetNode(baseNode)
+          mapped++
+        } else {
+          unmapped++
+          if (unmappedNames.length < 5) unmappedNames.push(name)
+        }
       }
+      console.log(`[check-3d] ${clipName}: ${mapped} channels retargeted, ${unmapped} unmapped, ${channelsToRemove.length} face-filtered`, unmappedNames.length > 0 ? `unmapped: ${unmappedNames.join(", ")}` : "")
       for (const ch of channelsToRemove) anim.removeChannel(ch)
     }
   }
 
+  // Fallback: si no hay animación idle, crear una sintética desde el bind pose
+  if (!hasIdle) {
+    console.log("[check-3d] No idle animation available — generating synthetic idle from bind pose")
+    createSyntheticIdleAnimation(baseDoc)
+  }
+
   await baseDoc.transform(unpartition())
   return await io.writeBinary(baseDoc)
+}
+
+/**
+ * Estrategia simplificada de fallback: lee el modelo base, intenta copiar animaciones
+ * de los GLBs de walk/run/idle, y si no hay idle, crea una sintética.
+ * No hace retargeteo de nodos (más simple, menos propenso a fallos).
+ */
+async function embedAnimationsIntoBase(
+  baseBytes: Uint8Array,
+  walkBytes: Uint8Array | null,
+  runBytes: Uint8Array | null,
+  idleBytes: Uint8Array | null,
+): Promise<Uint8Array | null> {
+  const io = new DenoIO(path)
+  const baseDoc = await io.readBinary(baseBytes)
+  const root = baseDoc.getRoot()
+
+  // Build fuzzy resolver for Mixamo → model bone name mapping
+  const nameToNode = new Map<string, ReturnType<typeof root.listNodes>[number]>()
+  for (const node of root.listNodes()) {
+    const n = node.getName()
+    if (n) nameToNode.set(n, node)
+  }
+  const resolveNode = buildBoneResolver(nameToNode)
+
+  let hasIdle = false
+  const animSources: [Uint8Array | null, string][] = [
+    [walkBytes, "walking"],
+    [runBytes, "running"],
+    [idleBytes, "idle"],
+  ]
+
+  for (const [bytes, clipName] of animSources) {
+    if (!bytes || bytes.length === 0) continue
+    try {
+      const sourceDoc = await io.readBinary(bytes)
+      const anims = sourceDoc.getRoot().listAnimations()
+      if (anims.length === 0) continue
+
+      const beforeIds = new Set(root.listAnimations())
+      copyToDocument(baseDoc, sourceDoc, anims)
+
+      for (const anim of root.listAnimations()) {
+        if (beforeIds.has(anim)) continue
+        anim.setName(clipName)
+        if (clipName === "idle") hasIdle = true
+        const filterFace = clipName === "walking" || clipName === "running"
+        const channelsToRemove: ReturnType<typeof anim.listChannels>[number][] = []
+        // Retarget channels to base model bones & filter upper body for locomotion
+        for (const ch of anim.listChannels()) {
+          const target = ch.getTargetNode()
+          if (!target) continue
+          const name = target.getName() ?? ""
+          if (filterFace && isFaceOrHeadBone(name)) {
+            channelsToRemove.push(ch)
+            continue
+          }
+          const baseNode = resolveNode(name)
+          if (baseNode) ch.setTargetNode(baseNode)
+        }
+        for (const ch of channelsToRemove) anim.removeChannel(ch)
+        if (channelsToRemove.length > 0) {
+          console.log(`[check-3d] embedAnimations: filtered ${channelsToRemove.length} upper-body channels from ${clipName}`)
+        }
+      }
+    } catch (e) {
+      console.error(`[check-3d] embedAnimationsIntoBase: failed to embed ${clipName}:`, e)
+    }
+  }
+
+  if (!hasIdle) {
+    console.log("[check-3d] embedAnimationsIntoBase: no idle found, creating synthetic")
+    createSyntheticIdleAnimation(baseDoc)
+  }
+
+  await baseDoc.transform(unpartition())
+  return await io.writeBinary(baseDoc)
+}
+
+/**
+ * Crea una animación "idle" sintética de 2 segundos que mantiene el bind pose
+ * (posición de reposo) de todos los huesos del esqueleto. Esto garantiza que
+ * el GLB siempre tenga un clip "idle" para que los viewers 3D no muestren T-pose.
+ */
+function createSyntheticIdleAnimation(
+  doc: any,
+): void {
+  const root = doc.getRoot()
+  const anim = doc.createAnimation("idle")
+
+  // Keyframe times: 0s and 2s (a short loopable idle)
+  const timeAccessor = doc.createAccessor("idle_time")
+    .setType(GltfAccessor.Type.SCALAR)
+    .setArray(new Float32Array([0, 2]))
+
+  // Find all skinned joints (skeleton bones) in the document
+  const skinnedJoints = new Set<ReturnType<typeof root.listNodes>[number]>()
+  for (const skin of root.listSkins()) {
+    for (const joint of skin.listJoints()) {
+      skinnedJoints.add(joint)
+    }
+  }
+
+  // If no skins found, fall back to all nodes (some rigs don't use skins explicitly)
+  const targetNodes = skinnedJoints.size > 0
+    ? Array.from(skinnedJoints)
+    : root.listNodes()
+
+  let channelCount = 0
+  for (const node of targetNodes) {
+    // Translation channel — hold current position
+    const t = node.getTranslation()
+    const translationAccessor = doc.createAccessor(`idle_t_${node.getName() ?? channelCount}`)
+      .setType(GltfAccessor.Type.VEC3)
+      .setArray(new Float32Array([t[0], t[1], t[2], t[0], t[1], t[2]]))
+
+    const tSampler = doc.createAnimationSampler()
+      .setInput(timeAccessor)
+      .setOutput(translationAccessor)
+      .setInterpolation("LINEAR")
+
+    anim.addChannel(
+      doc.createAnimationChannel()
+        .setTargetNode(node)
+        .setTargetPath("translation")
+        .setSampler(tSampler),
+    )
+
+    // Rotation channel — hold current quaternion
+    const r = node.getRotation()
+    const rotationAccessor = doc.createAccessor(`idle_r_${node.getName() ?? channelCount}`)
+      .setType(GltfAccessor.Type.VEC4)
+      .setArray(new Float32Array([r[0], r[1], r[2], r[3], r[0], r[1], r[2], r[3]]))
+
+    const rSampler = doc.createAnimationSampler()
+      .setInput(timeAccessor)
+      .setOutput(rotationAccessor)
+      .setInterpolation("LINEAR")
+
+    anim.addChannel(
+      doc.createAnimationChannel()
+        .setTargetNode(node)
+        .setTargetPath("rotation")
+        .setSampler(rSampler),
+    )
+
+    channelCount++
+  }
+
+  console.log(`[check-3d] Synthetic idle animation created with ${channelCount} bone channels`)
 }
 
 function sleep(ms: number): Promise<void> {

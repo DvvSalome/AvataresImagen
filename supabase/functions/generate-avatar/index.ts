@@ -72,13 +72,13 @@ CRITICAL - FULL BODY VISIBILITY:
 ABSOLUTE REQUIREMENTS FOR 3D TEXTURING CONSISTENCY:
 - This is the EXACT SAME character rotated to a different angle. NOT a new character.
 - BACKGROUND: Pure solid light gray (#D0D0D0). Identical to the front view. NO gradients, NO shadows, NO floor, NO ground plane.
-- COLORS: Use the EXACT SAME colors as the front view. Every color (skin tone, hair color, clothing color, shoe color) must be pixel-perfect identical.
-- LIGHTING: Same soft, even, uniform lighting as the front view. NO dramatic shadows.
+- COLORS: Use the EXACT SAME hex colors as the front view. Every color (skin tone, hair color, clothing color, shoe color) must be pixel-perfect identical. Do NOT shift hues, do NOT desaturate, do NOT brighten or darken ANY color. The RGB values must match exactly.
+- LIGHTING: Same soft, even, uniform lighting as the front view. NO dramatic shadows. NO specular highlights. Flat even illumination.
 - SCALE & POSITION: Character must be the EXACT same size and centered in the EXACT same position as the front view. The top of the head and bottom of the feet must be at the same vertical positions.
 - PROPORTIONS: Identical body proportions, head size, limb length, leg length. The full silhouette height must match exactly.
 - POSE: Same T-pose. Arms at the same height and angle. Legs same stance.
-- EDGES: Clean, sharp boundaries between skin, hair, and clothing regions.
-- STYLE: Same clean 3D render style. NOT painterly, NOT sketchy.
+- EDGES: Clean, sharp boundaries between skin, hair, and clothing regions. No color bleeding between adjacent regions.
+- STYLE: Same clean 3D render style. NOT painterly, NOT sketchy. No texture noise or grain.
 
 ${viewMap[perspective.key]}`
 
@@ -182,13 +182,13 @@ CRITICAL - FULL BODY VISIBILITY:
 TECHNICAL REQUIREMENTS FOR 3D MODEL TEXTURING:
 - BACKGROUND: Pure solid light gray (#D0D0D0) background. NO gradients, NO shadows on background, NO floor, NO ground plane, NO environment.
 - POSE: Exact T-pose with arms extended perfectly horizontally. Legs straight, slightly apart.
-- COLORS: Use flat, solid, well-defined colors with good contrast. Each region (skin, hair, clothing, shoes) must have a distinct, clean, uniform color. The body and clothing must have STRONG contrast against the gray background.
-- LIGHTING: Soft, even, frontal lighting. NO dramatic shadows. The lighting must be perfectly uniform across the ENTIRE character from head to feet.
-- EDGES: Clean, sharp edges between different colored regions.
+- COLORS: Use flat, solid, well-defined colors with good contrast. Each region (skin, hair, clothing, shoes) must have a distinct, clean, uniform color with consistent hex values. The body and clothing must have STRONG contrast against the gray background. No color noise, no random color variations within a single region.
+- LIGHTING: Soft, even, flat frontal lighting. NO dramatic shadows, NO specular highlights, NO reflections. The lighting must be perfectly uniform across the ENTIRE character from head to feet. Pure diffuse illumination only.
+- EDGES: Clean, sharp edges between different colored regions. No color bleeding between adjacent areas.
 - CENTERING: Character must be perfectly centered horizontally. Vertically, the full body should be centered with equal margins top and bottom.
 - SCALE: The FULL BODY (head to feet) should occupy approximately 85% of the image height, ensuring every body part is large enough to be clearly seen.
 - VIEW: FRONT view, character facing directly towards the camera.
-- STYLE: Clean 3D render look, like a game asset reference sheet. NOT a painting, NOT a sketch.`
+- STYLE: Clean 3D render look, like a game asset reference sheet. NOT a painting, NOT a sketch. No texture grain or noise.`
 
     const ai = new GoogleGenAI({ apiKey: Deno.env.get("GEMINI_API_KEY")! })
 
@@ -299,11 +299,12 @@ TECHNICAL REQUIREMENTS FOR 3D MODEL TEXTURING:
 
         try {
           const textureDesc = [
-            `Full body 3D stylized character: ${hairDescription} hair, ${outfitDescription}, visible shoes.`,
-            "High quality, consistent texturing on ALL sides: front, back, left, right, top and bottom.",
-            "No artifacts or blur on occluded or barely visible areas; clean solid colors and smooth skin everywhere.",
-            "Uniform lighting and color matching across every angle. Game-ready, professional PBR texture.",
-          ].join(" ")
+            `Full body 3D stylized character with ${hairDescription} hair and ${outfitDescription}.`,
+            "Reproduce the EXACT colors from the input images with no color shifting, no desaturation, and no hue changes.",
+            "Textures must be pixel-faithful to the source images: same skin tone, same hair color, same clothing colors.",
+            "Clean solid colors, no artifacts, no blur, no smearing on any surface including occluded areas.",
+            "Uniform consistent texturing on all sides. Game-ready PBR texture, sharp clean edges between color regions.",
+          ].join(" ").slice(0, 600)
           const meshyBody: Record<string, unknown> = {
             image_urls: imageUrls,
             ai_model: "meshy-6",
@@ -314,7 +315,7 @@ TECHNICAL REQUIREMENTS FOR 3D MODEL TEXTURING:
             target_polycount: 30000,
             symmetry_mode: "auto",
             pose_mode: "t-pose",
-            texture_prompt: textureDesc.slice(0, 600),
+            texture_prompt: textureDesc,
           }
           const meshyRes = await fetch("https://api.meshy.ai/openapi/v1/multi-image-to-3d", {
             method: "POST",
